@@ -74,33 +74,17 @@
                     app:tint="@color/folder_icon" />
             </FrameLayout>
 
-            <LinearLayout
+            <fr.nicovape.nicofiles.FriendlyPathTextView
+                android:id="@+id/textPath"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
                 android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/textPath"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="@color/on_surface"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/textPathParent"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:ellipsize="start"
-                    android:maxLines="1"
-                    android:textColor="@color/on_surface_variant"
-                    android:textSize="12sp" />
-            </LinearLayout>
+                android:ellipsize="start"
+                android:lineSpacingExtra="2dp"
+                android:maxLines="2"
+                android:textColor="@color/on_surface"
+                android:textSize="16sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonPaste"
