@@ -1,5 +1,5 @@
-Commit source: 98e7abfba8625fa62329f99502ab19a6865741f8
-Date UTC: 2026-08-02T22:06:49Z
+Commit source: a8f95bc3656485ccbdf25eb2305a864adfd834e6
+Date UTC: 2026-08-02T22:07:57Z
 STEP checkout: OK
 STEP java: OK
 openjdk version "17.0.19" 2026-04-21
@@ -12,4 +12,25 @@ ANDROID_HOME=/usr/local/lib/android/sdk
 STEP sdkmanager android-36: START
 Loading package information...                                                  Loading local repository...                                                     [                                       ] 3% Loading local repository...        [                                       ] 3% Fetch remote repository...         [=                                      ] 3% Fetch remote repository...         [=                                      ] 4% Fetch remote repository...         [=                                      ] 5% Fetch remote repository...         [==                                     ] 5% Fetch remote repository...         [==                                     ] 6% Fetch remote repository...         [==                                     ] 7% Fetch remote repository...         [==                                     ] 7% Computing updates...               [===                                    ] 8% Computing updates...               [===                                    ] 10% Computing updates...              [=======================================] 100% Computing updates...             
 
+STEP sdkmanager android-36: OK
+STEP setup-gradle: OK
+/home/runner/work/_temp/.gradle-actions/gradle-installations/installs/gradle-8.13/bin/gradle
+
+------------------------------------------------------------
+Gradle 8.13
+------------------------------------------------------------
+
+Build time:    2025-02-25 09:22:14 UTC
+Revision:      073314332697ba45c16c0a0ce1891fa6794179ff
+
+Kotlin:        2.0.21
+Groovy:        3.0.22
+Ant:           Apache Ant(TM) version 1.10.15 compiled on August 25 2024
+Launcher JVM:  17.0.19 (Eclipse Adoptium 17.0.19+10)
+Daemon JVM:    /usr/lib/jvm/temurin-17-jdk-amd64 (no JDK specified, using current Java home)
+OS:            Linux 6.17.0-1020-azure amd64
+
+STEP archive: START
+NicoFiles_v1.0_source.zip: FAILED
+sha256sum: WARNING: 1 computed checksum did NOT match
 STEP workflow: FAILED
