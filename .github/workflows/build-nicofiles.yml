@@ -28,34 +28,70 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Initialiser le diagnostic
+        run: |
+          mkdir -p ci-logs
+          {
+            echo "Commit source: $GITHUB_SHA"
+            echo "Date UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "STEP checkout: OK"
+          } > ci-logs/nicofiles-latest.log
+
       - name: Installer Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      - name: Vérifier Java
+        run: |
+          echo "STEP java: OK" >> ci-logs/nicofiles-latest.log
+          java -version 2>&1 | tee -a ci-logs/nicofiles-latest.log
+
       - name: Installer le SDK Android
         uses: android-actions/setup-android@v3
 
+      - name: Vérifier le SDK Android
+        run: |
+          echo "STEP setup-android: OK" >> ci-logs/nicofiles-latest.log
+          echo "ANDROID_HOME=$ANDROID_HOME" >> ci-logs/nicofiles-latest.log
+          sdkmanager --version 2>&1 | tee -a ci-logs/nicofiles-latest.log
+
       - name: Installer Android API 36
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "STEP sdkmanager android-36: START" >> ci-logs/nicofiles-latest.log
+          yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" 2>&1 | tee -a ci-logs/nicofiles-latest.log
+          echo "STEP sdkmanager android-36: OK" >> ci-logs/nicofiles-latest.log
 
       - name: Installer Gradle 8.13 et configurer le cache
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Vérifier et extraire le projet
+      - name: Vérifier Gradle
+        shell: bash
         run: |
-          sha256sum -c NicoFiles_v1.0_source.zip.sha256
+          set -o pipefail
+          echo "STEP setup-gradle: OK" >> ci-logs/nicofiles-latest.log
+          command -v gradle 2>&1 | tee -a ci-logs/nicofiles-latest.log
+          gradle --version 2>&1 | tee -a ci-logs/nicofiles-latest.log
+
+      - name: Vérifier et extraire le projet
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "STEP archive: START" >> ci-logs/nicofiles-latest.log
+          sha256sum -c NicoFiles_v1.0_source.zip.sha256 2>&1 | tee -a ci-logs/nicofiles-latest.log
           rm -rf NicoFilesBuild
           mkdir -p NicoFilesBuild
-          unzip -o NicoFiles_v1.0_source.zip -d NicoFilesBuild
+          unzip -o NicoFiles_v1.0_source.zip -d NicoFilesBuild 2>&1 | tee -a ci-logs/nicofiles-latest.log
           test -f NicoFilesBuild/settings.gradle.kts
           test -f NicoFilesBuild/build.gradle.kts
           test -f NicoFilesBuild/app/build.gradle.kts
           test -f NicoFilesBuild/app/src/main/AndroidManifest.xml
-          gradle --version
+          echo "STEP archive: OK" >> ci-logs/nicofiles-latest.log
 
       - name: Tests et compilation
         id: compile
@@ -63,19 +99,15 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee ../nicofiles-build.log
+          echo "STEP gradle-build: START" >> ../ci-logs/nicofiles-latest.log
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a ../ci-logs/nicofiles-latest.log
+          echo "STEP gradle-build: OK" >> ../ci-logs/nicofiles-latest.log
 
-      - name: Enregistrer le journal d'échec dans le dépôt
+      - name: Enregistrer le diagnostic d'échec dans le dépôt
         if: failure()
         shell: bash
         run: |
-          mkdir -p ci-logs
-          {
-            echo "Commit source: $GITHUB_SHA"
-            echo "Date UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo
-            cat nicofiles-build.log 2>/dev/null || echo "Le journal Gradle n'a pas été créé."
-          } > ci-logs/nicofiles-latest.log
+          echo "STEP workflow: FAILED" >> ci-logs/nicofiles-latest.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ci-logs/nicofiles-latest.log
@@ -87,7 +119,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NicoFiles-build-log
-          path: nicofiles-build.log
+          path: ci-logs/nicofiles-latest.log
           if-no-files-found: warn
           retention-days: 7
 
