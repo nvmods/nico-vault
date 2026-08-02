@@ -1,0 +1,1 @@
+Préparation de NicoVault 2.2 avec verrouillage biométrique.
