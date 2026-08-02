@@ -1,5 +1,5 @@
-Commit source: a8f95bc3656485ccbdf25eb2305a864adfd834e6
-Date UTC: 2026-08-02T22:07:57Z
+Commit source: 2dbf051bd4399911bfd007789a6f920087824a31
+Date UTC: 2026-08-02T22:10:37Z
 STEP checkout: OK
 STEP java: OK
 openjdk version "17.0.19" 2026-04-21
@@ -31,6 +31,12 @@ Daemon JVM:    /usr/lib/jvm/temurin-17-jdk-amd64 (no JDK specified, using curren
 OS:            Linux 6.17.0-1020-azure amd64
 
 STEP archive: START
-NicoFiles_v1.0_source.zip: FAILED
-sha256sum: WARNING: 1 computed checksum did NOT match
+0d2545de36de3b978d191aa45a01cbc9c2c6bad3befc87d51ed3eb5dfcde2428  NicoFiles_v1.0_source.zip
+Archive:  NicoFiles_v1.0_source.zip
+  End-of-central-directory signature not found.  Either this file is not
+  a zipfile, or it constitutes one disk of a multi-part archive.  In the
+  latter case the central directory and zipfile comment will be found on
+  the last disk(s) of this archive.
+unzip:  cannot find zipfile directory in one of NicoFiles_v1.0_source.zip or
+        NicoFiles_v1.0_source.zip.zip, and cannot find NicoFiles_v1.0_source.zip.ZIP, period.
 STEP workflow: FAILED
