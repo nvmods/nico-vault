@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'NicoFiles_v1.0_source.zip'
+      - 'NicoFiles/**'
       - '.github/workflows/build-nicofiles.yml'
   workflow_dispatch:
 
@@ -42,60 +42,33 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Vérifier Java
-        run: |
-          echo "STEP java: OK" >> ci-logs/nicofiles-latest.log
-          java -version 2>&1 | tee -a ci-logs/nicofiles-latest.log
-
       - name: Installer le SDK Android
         uses: android-actions/setup-android@v3
-
-      - name: Vérifier le SDK Android
-        run: |
-          echo "STEP setup-android: OK" >> ci-logs/nicofiles-latest.log
-          echo "ANDROID_HOME=$ANDROID_HOME" >> ci-logs/nicofiles-latest.log
-          sdkmanager --version 2>&1 | tee -a ci-logs/nicofiles-latest.log
 
       - name: Installer Android API 36
         shell: bash
         run: |
           set -o pipefail
-          echo "STEP sdkmanager android-36: START" >> ci-logs/nicofiles-latest.log
           sdkmanager "platforms;android-36" "build-tools;35.0.0" 2>&1 | tee -a ci-logs/nicofiles-latest.log
-          echo "STEP sdkmanager android-36: OK" >> ci-logs/nicofiles-latest.log
 
-      - name: Installer Gradle 8.13 et configurer le cache
+      - name: Installer Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Vérifier Gradle
+      - name: Vérifier le projet
         shell: bash
         run: |
           set -o pipefail
-          echo "STEP setup-gradle: OK" >> ci-logs/nicofiles-latest.log
-          command -v gradle 2>&1 | tee -a ci-logs/nicofiles-latest.log
+          test -f NicoFiles/settings.gradle.kts
+          test -f NicoFiles/build.gradle.kts
+          test -f NicoFiles/app/build.gradle.kts
+          test -f NicoFiles/app/src/main/AndroidManifest.xml
+          echo "STEP project: OK" >> ci-logs/nicofiles-latest.log
           gradle --version 2>&1 | tee -a ci-logs/nicofiles-latest.log
 
-      - name: Vérifier et extraire le projet
-        shell: bash
-        run: |
-          set -o pipefail
-          echo "STEP archive: START" >> ci-logs/nicofiles-latest.log
-          sha256sum NicoFiles_v1.0_source.zip 2>&1 | tee -a ci-logs/nicofiles-latest.log
-          unzip -t NicoFiles_v1.0_source.zip 2>&1 | tee -a ci-logs/nicofiles-latest.log
-          rm -rf NicoFilesBuild
-          mkdir -p NicoFilesBuild
-          unzip -o NicoFiles_v1.0_source.zip -d NicoFilesBuild 2>&1 | tee -a ci-logs/nicofiles-latest.log
-          test -f NicoFilesBuild/settings.gradle.kts
-          test -f NicoFilesBuild/build.gradle.kts
-          test -f NicoFilesBuild/app/build.gradle.kts
-          test -f NicoFilesBuild/app/src/main/AndroidManifest.xml
-          echo "STEP archive: OK" >> ci-logs/nicofiles-latest.log
-
       - name: Tests et compilation
-        id: compile
-        working-directory: NicoFilesBuild
+        working-directory: NicoFiles
         shell: bash
         run: |
           set -o pipefail
@@ -103,7 +76,7 @@ jobs:
           gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a ../ci-logs/nicofiles-latest.log
           echo "STEP gradle-build: OK" >> ../ci-logs/nicofiles-latest.log
 
-      - name: Enregistrer le diagnostic d'échec dans le dépôt
+      - name: Enregistrer le diagnostic d'échec
         if: failure()
         shell: bash
         run: |
@@ -114,7 +87,7 @@ jobs:
           git commit -m "Record latest NicoFiles build failure" || exit 0
           git push origin HEAD:main
 
-      - name: Publier le journal de build
+      - name: Publier le journal
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -127,7 +100,7 @@ jobs:
         if: success()
         run: |
           mkdir -p artifacts
-          cp NicoFilesBuild/app/build/outputs/apk/debug/app-debug.apk artifacts/NicoFiles-v1.0-debug.apk
+          cp NicoFiles/app/build/outputs/apk/debug/app-debug.apk artifacts/NicoFiles-v1.0-debug.apk
           cd artifacts
           sha256sum NicoFiles-v1.0-debug.apk > NicoFiles-v1.0-debug.apk.sha256
 
