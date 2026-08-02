@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NicoVault</string>
+    <string name="title">NicoVault</string>
+    <string name="subtitle">Coffre local de documents</string>
+    <string name="description">Les fichiers sont traités uniquement sur ce téléphone. L’application ne demande ni Internet ni accès global au stockage. Le document original reste inchangé : vérifie la copie chiffrée avant de le supprimer toi-même.</string>
+    <string name="encrypt_button">Chiffrer un document</string>
+    <string name="decrypt_button">Déchiffrer un fichier .ncrypt</string>
+    <string name="status_ready">Prêt.</string>
+    <string name="status_locked">NicoVault est verrouillé.</string>
+    <string name="security_warning">Important : la clé appartient à cette installation. Une désinstallation, un effacement des données ou un changement de téléphone rendra les fichiers illisibles.</string>
+    <string name="technical_info">AES-256-GCM par blocs authentifiés · clé non exportable Android Keystore · accès protégé par biométrie</string>
+
+    <string name="unlock_title">NicoVault verrouillé</string>
+    <string name="unlock_explanation">Authentifie-toi pour accéder au chiffrement et au déchiffrement.</string>
+    <string name="unlock_button">Déverrouiller</string>
+    <string name="configure_security">Configurer la sécurité</string>
+    <string name="open_security_settings">Ouvrir les réglages de sécurité</string>
+    <string name="biometric_title">Déverrouiller NicoVault</string>
+    <string name="biometric_subtitle">Utilise ton empreinte ou le verrouillage sécurisé du téléphone.</string>
+    <string name="biometric_not_enrolled">Aucune empreinte ou méthode de verrouillage compatible n’est configurée.</string>
+    <string name="biometric_no_hardware">Ce téléphone ne dispose pas d’une authentification biométrique compatible.</string>
+    <string name="biometric_unavailable">Le capteur biométrique est temporairement indisponible.</string>
+    <string name="authentication_failed">Empreinte non reconnue. Réessaie.</string>
+    <string name="authentication_cancelled">NicoVault reste verrouillé : %1$s</string>
+    <string name="authentication_expired">La session de sécurité a expiré. Déverrouille de nouveau NicoVault.</string>
+    <string name="keystore_setup_error">Impossible de préparer la clé protégée : %1$s</string>
+    <string name="cancel">Annuler</string>
+
+    <string name="encrypting">Chiffrement en cours…</string>
+    <string name="decrypting">Déchiffrement en cours…</string>
+    <string name="encrypted_success">Document chiffré</string>
+    <string name="decrypted_success">Document déchiffré</string>
+</resources>
