@@ -47,7 +47,7 @@ class FileAdapter(
         private val icon: ImageView = view.findViewById(R.id.imageIcon)
         private val name: TextView = view.findViewById(R.id.textName)
         private val details: TextView = view.findViewById(R.id.textDetails)
-        private val selected: TextView = view.findViewById(R.id.textSelected)
+        private val selected: ImageView = view.findViewById(R.id.textSelected)
 
         fun bind(file: File) {
             val isSelected = selectedPaths.contains(file.absolutePath)
@@ -58,13 +58,14 @@ class FileAdapter(
 
             val placeholder = iconFor(file)
             if (file.isImage() || file.isVideo()) {
+                icon.scaleType = ImageView.ScaleType.CENTER_CROP
                 icon.clearColorFilter()
                 ThumbnailLoader.load(file, icon, placeholder)
             } else {
                 icon.tag = null
+                icon.scaleType = ImageView.ScaleType.CENTER_INSIDE
                 icon.setImageResource(placeholder)
-                val tint = if (file.isDirectory) R.color.primary else R.color.on_surface
-                icon.setColorFilter(ContextCompat.getColor(icon.context, tint))
+                icon.setColorFilter(ContextCompat.getColor(icon.context, tintFor(file)))
             }
 
             root.setOnClickListener { onClick(file) }
@@ -85,13 +86,20 @@ class FileAdapter(
         }
 
         private fun iconFor(file: File): Int = when {
-            file.isDirectory -> android.R.drawable.ic_menu_agenda
-            file.isImage() -> android.R.drawable.ic_menu_gallery
-            file.isVideo() -> android.R.drawable.ic_media_play
-            file.isAudio() -> android.R.drawable.ic_media_ff
-            file.isArchive() -> android.R.drawable.ic_menu_upload
-            file.extension.equals("pdf", true) -> android.R.drawable.ic_menu_view
-            else -> android.R.drawable.ic_menu_save
+            file.isDirectory -> R.drawable.ic_folder_24
+            file.isImage() -> R.drawable.ic_image_24
+            file.isVideo() -> R.drawable.ic_video_24
+            file.isAudio() -> R.drawable.ic_audio_24
+            file.isArchive() -> R.drawable.ic_archive_24
+            file.extension.equals("pdf", true) -> R.drawable.ic_pdf_24
+            else -> R.drawable.ic_file_24
+        }
+
+        private fun tintFor(file: File): Int = when {
+            file.isDirectory -> R.color.folder_icon
+            file.extension.equals("pdf", true) -> R.color.danger
+            file.isArchive() || file.isAudio() -> R.color.media_icon
+            else -> R.color.on_surface_variant
         }
     }
 }
