@@ -14,7 +14,7 @@ jobs:
   build:
     name: Test and build debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Récupérer le dépôt
@@ -26,27 +26,41 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurer le cache Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Installer le SDK Android
+        uses: android-actions/setup-android@v3
 
-      - name: Extraire le projet Android
+      - name: Installer Android API 36
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Extraire et corriger le projet Android
         run: |
           rm -rf CoffreDoc
           mkdir -p CoffreDoc
           unzip -o CoffreDoc_v2_native_keystore_github.zip -d CoffreDoc
-          echo "===== Racine du projet extrait ====="
-          ls -la CoffreDoc
+
+          # Activity 1.13.0 est compilé avec API 36 : alignement du projet.
+          sed -i 's/version "8.9.2"/version "8.12.2"/' CoffreDoc/build.gradle.kts
+          sed -i 's/compileSdk = 35/compileSdk = 36/' CoffreDoc/app/build.gradle.kts
+          sed -i 's/gradle-8.11.1-bin.zip/gradle-8.13-bin.zip/' CoffreDoc/gradle/wrapper/gradle-wrapper.properties
+
+          echo "===== Versions réellement utilisées ====="
+          grep -n "com.android.application" CoffreDoc/build.gradle.kts
+          grep -n "compileSdk" CoffreDoc/app/build.gradle.kts
+          grep -n "activity-ktx" CoffreDoc/app/build.gradle.kts
+          grep -n "distributionUrl" CoffreDoc/gradle/wrapper/gradle-wrapper.properties
+
           test -f CoffreDoc/gradlew
           test -f CoffreDoc/settings.gradle.kts
           test -f CoffreDoc/app/build.gradle.kts
 
-      - name: Autoriser le wrapper Gradle
-        working-directory: CoffreDoc
-        run: chmod +x gradlew
+      - name: Configurer le cache Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Tests et compilation de l'APK
         working-directory: CoffreDoc
-        run: ./gradlew --no-daemon clean testDebugUnitTest assembleDebug
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean testDebugUnitTest assembleDebug
 
       - name: Préparer l'artefact
         run: |
