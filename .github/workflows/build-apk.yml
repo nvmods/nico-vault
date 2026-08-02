@@ -29,16 +29,29 @@ jobs:
       - name: Configurer le cache Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Extraire le projet Android
+        run: |
+          rm -rf CoffreDoc
+          mkdir -p CoffreDoc
+          unzip -o CoffreDoc_v2_native_keystore_github.zip -d CoffreDoc
+          echo "===== Racine du projet extrait ====="
+          ls -la CoffreDoc
+          test -f CoffreDoc/gradlew
+          test -f CoffreDoc/settings.gradle.kts
+          test -f CoffreDoc/app/build.gradle.kts
+
       - name: Autoriser le wrapper Gradle
+        working-directory: CoffreDoc
         run: chmod +x gradlew
 
       - name: Tests et compilation de l'APK
+        working-directory: CoffreDoc
         run: ./gradlew --no-daemon clean testDebugUnitTest assembleDebug
 
       - name: Préparer l'artefact
         run: |
           mkdir -p artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk artifacts/CoffreDoc-v2-debug.apk
+          cp CoffreDoc/app/build/outputs/apk/debug/app-debug.apk artifacts/CoffreDoc-v2-debug.apk
           cd artifacts
           sha256sum CoffreDoc-v2-debug.apk > CoffreDoc-v2-debug.apk.sha256
 
@@ -49,4 +62,3 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
-          
