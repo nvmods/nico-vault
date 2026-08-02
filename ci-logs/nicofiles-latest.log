@@ -1,42 +1,0 @@
-Commit source: 48002803daedd94ec5b8ccfad08a2239d44c31e6
-Date UTC: 2026-08-02T22:15:05Z
-STEP checkout: OK
-STEP java: OK
-openjdk version "17.0.19" 2026-04-21
-OpenJDK Runtime Environment Temurin-17.0.19+10 (build 17.0.19+10)
-OpenJDK 64-Bit Server VM Temurin-17.0.19+10 (build 17.0.19+10, mixed mode, sharing)
-STEP setup-android: OK
-ANDROID_HOME=/usr/local/lib/android/sdk
-16.0
-
-STEP sdkmanager android-36: START
-Loading package information...                                                  Loading local repository...                                                     [                                       ] 3% Loading local repository...        [                                       ] 3% Fetch remote repository...         [=                                      ] 3% Fetch remote repository...         [=                                      ] 4% Fetch remote repository...         [=                                      ] 5% Fetch remote repository...         [==                                     ] 5% Fetch remote repository...         [==                                     ] 6% Fetch remote repository...         [==                                     ] 7% Fetch remote repository...         [==                                     ] 7% Computing updates...               [===                                    ] 8% Computing updates...               [===                                    ] 10% Computing updates...              [=======================================] 100% Computing updates...             
-
-STEP sdkmanager android-36: OK
-STEP setup-gradle: OK
-/home/runner/work/_temp/.gradle-actions/gradle-installations/installs/gradle-8.13/bin/gradle
-
-------------------------------------------------------------
-Gradle 8.13
-------------------------------------------------------------
-
-Build time:    2025-02-25 09:22:14 UTC
-Revision:      073314332697ba45c16c0a0ce1891fa6794179ff
-
-Kotlin:        2.0.21
-Groovy:        3.0.22
-Ant:           Apache Ant(TM) version 1.10.15 compiled on August 25 2024
-Launcher JVM:  17.0.19 (Eclipse Adoptium 17.0.19+10)
-Daemon JVM:    /usr/lib/jvm/temurin-17-jdk-amd64 (no JDK specified, using current Java home)
-OS:            Linux 6.17.0-1020-azure amd64
-
-STEP archive: START
-fc598afbf4ee886b4ead04176e3c3ec6d531a4f663b01e3007596f31d164f180  NicoFiles_v1.0_source.zip
-Archive:  NicoFiles_v1.0_source.zip
-  End-of-central-directory signature not found.  Either this file is not
-  a zipfile, or it constitutes one disk of a multi-part archive.  In the
-  latter case the central directory and zipfile comment will be found on
-  the last disk(s) of this archive.
-unzip:  cannot find zipfile directory in one of NicoFiles_v1.0_source.zip or
-        NicoFiles_v1.0_source.zip.zip, and cannot find NicoFiles_v1.0_source.zip.ZIP, period.
-STEP workflow: FAILED
