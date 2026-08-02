@@ -5,6 +5,7 @@ import android.os.Environment
 import android.os.StatFs
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.HorizontalScrollView
@@ -153,8 +154,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configureButtons() {
-        findViewById<Button>(R.id.buttonLocations).setOnClickListener { locationsDialog() }
-        findViewById<Button>(R.id.buttonUp).setOnClickListener { current.parentFile?.let(::openDirectory) }
+        // Ces deux contrôles sont désormais des AppCompatImageButton dans le layout.
+        // View évite tout cast fragile entre Button et ImageButton au démarrage.
+        findViewById<View>(R.id.buttonLocations).setOnClickListener { locationsDialog() }
+        findViewById<View>(R.id.buttonUp).setOnClickListener { current.parentFile?.let(::openDirectory) }
         pasteButton.setOnClickListener { actions.paste() }
         findViewById<Button>(R.id.actionCopy).setOnClickListener { actions.copy(false) }
         findViewById<Button>(R.id.actionMove).setOnClickListener { actions.copy(true) }
