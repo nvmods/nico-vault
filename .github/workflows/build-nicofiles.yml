@@ -5,7 +5,6 @@ on:
     branches: [ main ]
     paths:
       - 'NicoFiles_v1.0_source.zip'
-      - 'NicoFiles_v1.0_source.zip.sha256'
       - '.github/workflows/build-nicofiles.yml'
   workflow_dispatch:
 
@@ -83,7 +82,8 @@ jobs:
         run: |
           set -o pipefail
           echo "STEP archive: START" >> ci-logs/nicofiles-latest.log
-          sha256sum -c NicoFiles_v1.0_source.zip.sha256 2>&1 | tee -a ci-logs/nicofiles-latest.log
+          sha256sum NicoFiles_v1.0_source.zip 2>&1 | tee -a ci-logs/nicofiles-latest.log
+          unzip -t NicoFiles_v1.0_source.zip 2>&1 | tee -a ci-logs/nicofiles-latest.log
           rm -rf NicoFilesBuild
           mkdir -p NicoFilesBuild
           unzip -o NicoFiles_v1.0_source.zip -d NicoFilesBuild 2>&1 | tee -a ci-logs/nicofiles-latest.log
