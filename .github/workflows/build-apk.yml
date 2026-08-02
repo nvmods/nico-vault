@@ -1,14 +1,20 @@
-name: Build APK
+name: Build NicoVault APK
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    paths:
+      - 'CoffreDoc_v2_native_keystore_github.zip'
+      - 'v22_overlay/**'
+      - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: nicovault-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -32,20 +38,20 @@ jobs:
       - name: Installer Android API 36
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Extraire et mettre à jour NicoVault
+      - name: Configurer le cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Extraire et préparer NicoVault
         run: |
           rm -rf NicoVault
           mkdir -p NicoVault
           unzip -o CoffreDoc_v2_native_keystore_github.zip -d NicoVault
-
-          # Superpose les sources NicoVault 2.2 avec verrouillage biométrique.
           cp -a v22_overlay/. NicoVault/
 
-          # Aligne les versions Android/Gradle déjà validées par le build précédent.
           sed -i 's/version "8.9.2"/version "8.12.2"/' NicoVault/build.gradle.kts
           sed -i 's/compileSdk = 35/compileSdk = 36/' NicoVault/app/build.gradle.kts
-          sed -i 's/versionCode = 2/versionCode = 3/' NicoVault/app/build.gradle.kts
-          sed -i 's/versionName = "2.0"/versionName = "2.2"/' NicoVault/app/build.gradle.kts
+          sed -i 's/versionCode = 2/versionCode = 4/' NicoVault/app/build.gradle.kts
+          sed -i 's/versionName = "2.0"/versionName = "2.3"/' NicoVault/app/build.gradle.kts
           sed -i 's/gradle-8.11.1-bin.zip/gradle-8.13-bin.zip/' NicoVault/gradle/wrapper/gradle-wrapper.properties
           sed -i 's/rootProject.name = "CoffreDoc"/rootProject.name = "NicoVault"/' NicoVault/settings.gradle.kts
 
@@ -53,37 +59,42 @@ jobs:
             sed -i '/androidx.activity:activity-ktx/a\    implementation("androidx.biometric:biometric:1.1.0")' NicoVault/app/build.gradle.kts
           fi
 
-          echo "===== Configuration NicoVault ====="
-          grep -n "com.android.application" NicoVault/build.gradle.kts
-          grep -nE "compileSdk|versionCode|versionName|biometric" NicoVault/app/build.gradle.kts
-          grep -n "distributionUrl" NicoVault/gradle/wrapper/gradle-wrapper.properties
-          grep -n "NicoVault" NicoVault/app/src/main/res/values/strings.xml
-
           test -f NicoVault/gradlew
           test -f NicoVault/settings.gradle.kts
           test -f NicoVault/app/build.gradle.kts
           test -f NicoVault/app/src/main/java/fr/nicovape/coffredoc/MainActivity.kt
+          test -f NicoVault/app/src/main/java/fr/nicovape/coffredoc/ShareEncryptActivity.kt
+          chmod +x NicoVault/gradlew
 
-      - name: Configurer le cache Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Tests et compilation de l'APK
+      - name: Tests et compilation
         working-directory: NicoVault
+        shell: bash
         run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace clean testDebugUnitTest assembleDebug
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee ../nicovault-build.log
 
-      - name: Préparer l'artefact
-        run: |
-          mkdir -p artifacts
-          cp NicoVault/app/build/outputs/apk/debug/app-debug.apk artifacts/NicoVault-v2.2-debug.apk
-          cd artifacts
-          sha256sum NicoVault-v2.2-debug.apk > NicoVault-v2.2-debug.apk.sha256
-
-      - name: Publier l'APK
+      - name: Publier le journal de build
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NicoVault-v2.2-debug-apk
+          name: NicoVault-build-log
+          path: nicovault-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Préparer l'APK
+        if: success()
+        run: |
+          mkdir -p artifacts
+          cp NicoVault/app/build/outputs/apk/debug/app-debug.apk artifacts/NicoVault-v2.3-debug.apk
+          cd artifacts
+          sha256sum NicoVault-v2.3-debug.apk > NicoVault-v2.3-debug.apk.sha256
+
+      - name: Publier l'APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NicoVault-v2.3-debug-apk
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
