@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/surface_container"
+        app:title="NicoFiles"
+        app:titleTextColor="@color/on_surface" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/surface_container"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:paddingBottom="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonLocations"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="Emplacements"
+            android:text="☰" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonUp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:contentDescription="Dossier parent"
+            android:text="↑" />
+
+        <TextView
+            android:id="@+id/textPath"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="10dp"
+            android:layout_weight="1"
+            android:ellipsize="start"
+            android:maxLines="2"
+            android:textColor="@color/on_surface"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonPaste"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="Coller"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/progress"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:indeterminate="true"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerFiles"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="6dp" />
+
+        <TextView
+            android:id="@+id/textEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:text="Dossier vide"
+            android:textColor="@color/on_surface"
+            android:textSize="16sp"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <HorizontalScrollView
+        android:id="@+id/actionBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/surface_container"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="6dp">
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionCopy" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Copier" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionMove" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Déplacer" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionRename" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Renommer" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionShare" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Partager" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionZip" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="ZIP" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionExtract" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Extraire" android:visibility="gone" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionVault" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="NicoVault" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionRestore" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Restaurer" android:visibility="gone" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/actionDelete" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Supprimer" android:textColor="@color/danger" />
+        </LinearLayout>
+    </HorizontalScrollView>
+</LinearLayout>
