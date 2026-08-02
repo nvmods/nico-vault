@@ -6,10 +6,15 @@ on:
     paths:
       - 'NicoFiles/**'
       - '.github/workflows/build-nicofiles.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'NicoFiles/**'
+      - '.github/workflows/build-nicofiles.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: nicofiles-${{ github.ref }}
@@ -24,17 +29,6 @@ jobs:
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Initialiser le diagnostic
-        run: |
-          mkdir -p ci-logs
-          {
-            echo "Commit source: $GITHUB_SHA"
-            echo "Date UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "STEP checkout: OK"
-          } > ci-logs/nicofiles-latest.log
 
       - name: Installer Java 17
         uses: actions/setup-java@v4
@@ -46,10 +40,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Installer Android API 36
-        shell: bash
-        run: |
-          set -o pipefail
-          sdkmanager "platforms;android-36" "build-tools;35.0.0" 2>&1 | tee -a ci-logs/nicofiles-latest.log
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
       - name: Installer Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
@@ -57,42 +48,25 @@ jobs:
           gradle-version: '8.13'
 
       - name: Vérifier le projet
-        shell: bash
         run: |
-          set -o pipefail
           test -f NicoFiles/settings.gradle.kts
           test -f NicoFiles/build.gradle.kts
           test -f NicoFiles/app/build.gradle.kts
           test -f NicoFiles/app/src/main/AndroidManifest.xml
-          echo "STEP project: OK" >> ci-logs/nicofiles-latest.log
-          gradle --version 2>&1 | tee -a ci-logs/nicofiles-latest.log
 
       - name: Tests et compilation
         working-directory: NicoFiles
         shell: bash
         run: |
           set -o pipefail
-          echo "STEP gradle-build: START" >> ../ci-logs/nicofiles-latest.log
-          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a ../ci-logs/nicofiles-latest.log
-          echo "STEP gradle-build: OK" >> ../ci-logs/nicofiles-latest.log
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee ../nicofiles-build.log
 
-      - name: Enregistrer le diagnostic d'échec
-        if: failure()
-        shell: bash
-        run: |
-          echo "STEP workflow: FAILED" >> ci-logs/nicofiles-latest.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ci-logs/nicofiles-latest.log
-          git commit -m "Record latest NicoFiles build failure" || exit 0
-          git push origin HEAD:main
-
-      - name: Publier le journal
+      - name: Publier le journal de build
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: NicoFiles-build-log
-          path: ci-logs/nicofiles-latest.log
+          path: nicofiles-build.log
           if-no-files-found: warn
           retention-days: 7
 
