@@ -74,15 +74,15 @@ jobs:
         if: success()
         run: |
           mkdir -p artifacts
-          cp NicoFiles/app/build/outputs/apk/debug/app-debug.apk artifacts/NicoFiles-v1.1-debug.apk
+          cp NicoFiles/app/build/outputs/apk/debug/app-debug.apk artifacts/NicoFiles-v1.1.1-debug.apk
           cd artifacts
-          sha256sum NicoFiles-v1.1-debug.apk > NicoFiles-v1.1-debug.apk.sha256
+          sha256sum NicoFiles-v1.1.1-debug.apk > NicoFiles-v1.1.1-debug.apk.sha256
 
       - name: Publier l'APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: NicoFiles-v1.1-debug-apk
+          name: NicoFiles-v1.1.1-debug-apk
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
