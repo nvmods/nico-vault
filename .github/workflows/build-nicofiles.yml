@@ -62,7 +62,7 @@ jobs:
         run: |
           set -o pipefail
           echo "STEP sdkmanager android-36: START" >> ci-logs/nicofiles-latest.log
-          yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" 2>&1 | tee -a ci-logs/nicofiles-latest.log
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" 2>&1 | tee -a ci-logs/nicofiles-latest.log
           echo "STEP sdkmanager android-36: OK" >> ci-logs/nicofiles-latest.log
 
       - name: Installer Gradle 8.13 et configurer le cache
