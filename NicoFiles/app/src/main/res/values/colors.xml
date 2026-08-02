@@ -1,12 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#2864DC</color>
-    <color name="primary_dark">#1647AE</color>
+    <color name="primary">#1E5FAE</color>
+    <color name="primary_dark">#123F78</color>
     <color name="on_primary">#FFFFFF</color>
-    <color name="surface">#F7F8FC</color>
+    <color name="primary_container">#D7E8FF</color>
+    <color name="on_primary_container">#0A315E</color>
+
+    <color name="secondary">#087F86</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="secondary_container">#C8F1F3</color>
+    <color name="on_secondary_container">#073F43</color>
+
+    <color name="surface">#F3F6FA</color>
     <color name="surface_container">#FFFFFF</color>
-    <color name="on_surface">#1A1C20</color>
-    <color name="selected">#DCE6FF</color>
-    <color name="divider">#E1E3E9</color>
-    <color name="danger">#B3261E</color>
+    <color name="surface_container_high">#E9EEF5</color>
+    <color name="on_surface">#18212B</color>
+    <color name="on_surface_variant">#596574</color>
+    <color name="selected">#DCEAFF</color>
+    <color name="outline">#C5CFDA</color>
+    <color name="divider">#DDE4EC</color>
+    <color name="folder_icon">#1E5FAE</color>
+    <color name="media_icon">#087F86</color>
+    <color name="danger">#B42318</color>
 </resources>
