@@ -1,0 +1,1 @@
+CI verification marker for NicoFiles 1.1.2. No functional code change.
