@@ -167,11 +167,10 @@ internal class CubeManager(
         val objectType = b.int
         val connected = b.get().toInt() != 0
 
-        if (connectingFactoryId == factoryId) {
-            connectWaiter?.complete(connected)
-        }
-
         if (connected) {
+            if (connectingFactoryId == factoryId) {
+                connectWaiter?.complete(true)
+            }
             var displacedFactoryId: Long? = null
 
             synchronized(lock) {
@@ -224,14 +223,29 @@ internal class CubeManager(
         }
 
         var changed = false
+        var staleDisconnect = false
 
         synchronized(lock) {
+            val current = cubesByFactory[factoryId]
+
+            // Les EVENT sont OOB : un ancien "false" peut arriver après une
+            // reconnexion ayant reçu un nouvel object_id. Ne jamais laisser
+            // cet événement périmé casser la liaison courante.
+            if (
+                current?.connected == true &&
+                current.objectId != null &&
+                current.objectId != objectId
+            ) {
+                staleDisconnect = true
+                return@synchronized
+            }
+
             if (activeFactoryByObjectId[objectId] == factoryId) {
                 activeFactoryByObjectId.remove(objectId)
             }
 
             val previous =
-                cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
+                current ?: CubeInfo(factoryId = factoryId)
 
             val next = previous.copy(
                 objectId = null,
@@ -252,6 +266,12 @@ internal class CubeManager(
                 cubesByFactory[factoryId] = next
                 changed = true
             }
+        }
+
+        if (staleDisconnect) return
+
+        if (connectingFactoryId == factoryId) {
+            connectWaiter?.complete(false)
         }
 
         if (changed) publish()
