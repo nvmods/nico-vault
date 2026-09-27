@@ -15,25 +15,21 @@ internal data class OutboundCommand(
 )
 
 private data class OutboundBatch(
-    val commands: List<OutboundCommand>,
-    val combineIntoFrame: Boolean,
-    val waitUntilAcknowledged: Boolean = false
+    val commands: List<OutboundCommand>
 )
 
 /**
- * Transport fiable pour les commandes ENGINE Cozmo.
+ * Transport ENGINE reconstruit sur le modèle PyCozmo.
  *
- * Les points importants par rapport à la V0.5/V0.6 initiale :
- * - file unique d'émission ;
- * - fenêtre de séquences acquittées ;
- * - retransmission des trames complètes ;
- * - un batch peut être combiné dans une trame ENGINE ou forcé en trames
- *   séparées tout en conservant strictement l'ordre.
+ * Différences volontaires par rapport au transport 0.7.x :
+ * - fenêtre de 62 PAQUETS (pas une table de trames) ;
+ * - ACK cumulatif inclusif par numéro de paquet ;
+ * - collecte des commandes pendant ~1/90 s avant encodage ;
+ * - retransmission de tous les paquets encore non acquittés après ~100 ms ;
+ * - les commandes voisines (ex. CubeId + CubeLights) restent voisines et
+ *   peuvent donc être encodées dans la même trame ENGINE.
  *
- * CubeId + CubeLights est un cas particulier : PyCozmo les envoie dans deux
- * trames successives. Le firmware semble appliquer la sélection de cube avant
- * la trame suivante ; les combiner peut donc éclairer le cube précédemment
- * sélectionné.
+ * Le transport ne contient aucune logique spécifique aux cubes.
  */
 internal class ReliableCommandTransport(
     private val scope: CoroutineScope,
@@ -41,85 +37,65 @@ internal class ReliableCommandTransport(
     private val sendRaw: suspend (ByteArray) -> Unit,
     private val onRetryCount: (Long) -> Unit = {}
 ) {
-    private data class PendingFrame(
-        val firstSeq: Int,
-        val lastSeq: Int,
-        val packetCount: Int,
-        val bytes: ByteArray,
-        var lastSentNanos: Long,
-        var attempts: Int
-    )
-
     private val queue = Channel<OutboundBatch>(Channel.UNLIMITED)
-    private val pendingMutex = Mutex()
-    private val pending = LinkedHashMap<Int, PendingFrame>()
-    private val windowChanged = Channel<Unit>(Channel.CONFLATED)
+    private val mutex = Mutex()
+    private val window = SendSequenceWindow<OutboundCommand>(
+        size = WINDOW_SIZE,
+        maxSeq = CozmoProtocol.MAX_SEQ
+    )
+    private val carry = ArrayDeque<OutboundCommand>()
 
-    private var nextSeq = 0
-    private var sendJob: Job? = null
-    private var retryJob: Job? = null
+    private var senderJob: Job? = null
+    private var lastAckTimeNanos = 0L
     private var retries = 0L
 
     fun start() {
-        if (sendJob != null) return
+        if (senderJob?.isActive == true) return
 
-        sendJob = scope.launch {
-            for (batch in queue) {
-                val groups =
-                    if (batch.combineIntoFrame) {
-                        splitForFrame(batch.commands)
-                    } else {
-                        batch.commands.map { listOf(it) }
+        senderJob = scope.launch {
+            while (isActive) {
+                delay(COLLECT_INTERVAL_MS)
+
+                var retryCountChanged = false
+
+                val packetsToSend = mutex.withLock {
+                    drainQueueIntoCarry()
+
+                    val newPackets = mutableListOf<Pair<Int, OutboundCommand>>()
+
+                    while (carry.isNotEmpty() && !window.isFull()) {
+                        val command = carry.removeFirst()
+                        val seq = window.put(command)
+                        newPackets += seq to command
                     }
-
-                var batchLastSeq: Int? = null
-
-                for (commands in groups) {
-                    waitForWindowSlots(commands.size)
-
-                    val firstSeq = pendingMutex.withLock {
-                        val value = nextSeq
-                        nextSeq = (nextSeq + commands.size) % CozmoProtocol.MAX_SEQ
-                        value
-                    }
-
-                    val lastSeq =
-                        (firstSeq + commands.size - 1) % CozmoProtocol.MAX_SEQ
-
-                    val frame = CozmoProtocol.commandFrame(
-                        firstSeq = firstSeq,
-                        ack = ackProvider(),
-                        commands = commands.map { it.id to it.payload }
-                    )
 
                     val now = System.nanoTime()
+                    val unacked = window.entries()
 
-                    pendingMutex.withLock {
-                        pending[lastSeq] = PendingFrame(
-                            firstSeq = firstSeq,
-                            lastSeq = lastSeq,
-                            packetCount = commands.size,
-                            bytes = frame,
-                            lastSentNanos = now,
-                            attempts = 1
-                        )
-                    }
+                    val resend =
+                        if (
+                            unacked.isNotEmpty() &&
+                            lastAckTimeNanos != 0L &&
+                            now - lastAckTimeNanos >= ACK_TIMEOUT_NS
+                        ) {
+                            lastAckTimeNanos = now
+                            retries += unacked.size
+                            retryCountChanged = true
+                            unacked
+                        } else {
+                            emptyList()
+                        }
 
-                    batchLastSeq = lastSeq
-                    sendRaw(frame)
-                    delay(MIN_SEND_GAP_MS)
+                    resend + newPackets
                 }
 
-                if (batch.waitUntilAcknowledged) {
-                    batchLastSeq?.let { waitUntilAcked(it) }
+                if (packetsToSend.isNotEmpty()) {
+                    sendSequencedPackets(packetsToSend)
                 }
-            }
-        }
 
-        retryJob = scope.launch {
-            while (isActive) {
-                delay(RETRY_SCAN_MS)
-                resendTimedOutFrames()
+                if (retryCountChanged) {
+                    onRetryCount(retries)
+                }
             }
         }
     }
@@ -127,8 +103,7 @@ internal class ReliableCommandTransport(
     fun enqueue(command: OutboundCommand) {
         queue.trySend(
             OutboundBatch(
-                commands = listOf(command),
-                combineIntoFrame = false
+                commands = listOf(command)
             )
         )
     }
@@ -137,168 +112,116 @@ internal class ReliableCommandTransport(
         if (commands.isNotEmpty()) {
             queue.trySend(
                 OutboundBatch(
-                    commands = commands,
-                    combineIntoFrame = true
+                    commands = commands.toList()
                 )
             )
         }
     }
 
+    /**
+     * Conservé pour compatibilité avec les appels existants.
+     * La reconstruction 0.8 utilise la même file que PyCozmo : pas de barrière
+     * ACK artificielle entre deux commandes adjacentes.
+     */
     fun enqueueSequential(
         commands: List<OutboundCommand>,
         waitUntilAcknowledged: Boolean = false
     ) {
-        if (commands.isNotEmpty()) {
-            queue.trySend(
-                OutboundBatch(
-                    commands = commands,
-                    combineIntoFrame = false,
-                    waitUntilAcknowledged = waitUntilAcknowledged
-                )
-            )
-        }
+        @Suppress("UNUSED_VARIABLE")
+        val ignoredBarrier = waitUntilAcknowledged
+        enqueueBatch(commands)
     }
 
     fun acknowledge(ack: Int) {
         if (ack == CozmoProtocol.OOB_SEQ) return
 
         scope.launch {
-            var changed = false
-
-            pendingMutex.withLock {
-                // L'ACK Cozmo est cumulatif. Nos trames sont stockées dans
-                // l'ordre d'émission et indexées par leur DERNIÈRE séquence.
-                // Lorsqu'un ACK correspond à une fin de trame, tout ce qui
-                // précède peut être libéré.
-                if (pending.containsKey(ack)) {
-                    val iterator = pending.entries.iterator()
-
-                    while (iterator.hasNext()) {
-                        val entry = iterator.next()
-                        iterator.remove()
-                        changed = true
-
-                        if (entry.key == ack) break
-                    }
-                }
-            }
-
-            if (changed) {
-                windowChanged.trySend(Unit)
+            mutex.withLock {
+                window.acknowledge(ack)
+                lastAckTimeNanos = System.nanoTime()
             }
         }
     }
 
     fun stop() {
-        sendJob?.cancel()
-        retryJob?.cancel()
-        sendJob = null
-        retryJob = null
+        senderJob?.cancel()
+        senderJob = null
         queue.close()
-        windowChanged.close()
-        pending.clear()
+
+        scope.launch {
+            mutex.withLock {
+                carry.clear()
+                window.reset()
+                lastAckTimeNanos = 0L
+            }
+        }
     }
 
-    private suspend fun waitUntilAcked(lastSeq: Int) {
+    private fun drainQueueIntoCarry() {
         while (true) {
-            val done = pendingMutex.withLock {
-                !pending.containsKey(lastSeq)
-            }
-
-            if (done) return
-
-            windowChanged.receive()
+            val batch = queue.tryReceive().getOrNull() ?: break
+            carry.addAll(batch.commands)
         }
     }
 
-    private suspend fun waitForWindowSlots(required: Int) {
-        while (true) {
-            val canSend = pendingMutex.withLock {
-                val pendingPackets =
-                    pending.values.sumOf { it.packetCount }
+    private suspend fun sendSequencedPackets(
+        packets: List<Pair<Int, OutboundCommand>>
+    ) {
+        if (packets.isEmpty()) return
 
-                pendingPackets + required <= WINDOW_SIZE
-            }
+        val ack = ackProvider()
+        var current = mutableListOf<Pair<Int, OutboundCommand>>()
+        var currentPayloadSize = 0
 
-            if (canSend) return
+        suspend fun flush() {
+            if (current.isEmpty()) return
 
-            windowChanged.receive()
-        }
-    }
+            val firstSeq = current.first().first
+            val commands = current.map { it.second }
 
-    private suspend fun resendTimedOutFrames() {
-        val now = System.nanoTime()
-        val retry = mutableListOf<PendingFrame>()
+            sendRaw(
+                CozmoProtocol.commandFrame(
+                    firstSeq = firstSeq,
+                    ack = ack,
+                    commands = commands.map { it.id to it.payload }
+                )
+            )
 
-        pendingMutex.withLock {
-            for (frame in pending.values) {
-                val ageMs =
-                    (now - frame.lastSentNanos) / 1_000_000L
-
-                if (ageMs >= ACK_TIMEOUT_MS) {
-                    frame.lastSentNanos = now
-                    frame.attempts++
-                    retry += frame
-
-                    if (retry.size >= MAX_RETRY_BURST) break
-                }
-            }
+            current = mutableListOf()
+            currentPayloadSize = 0
         }
 
-        if (retry.isEmpty()) return
-
-        for (frame in retry) {
-            sendRaw(frame.bytes)
-            retries++
-        }
-
-        onRetryCount(retries)
-    }
-
-    private fun splitForFrame(
-        commands: List<OutboundCommand>
-    ): List<List<OutboundCommand>> {
-        if (commands.isEmpty()) return emptyList()
-
-        val result = mutableListOf<List<OutboundCommand>>()
-        var current = mutableListOf<OutboundCommand>()
-        var payloadSize = 0
-
-        for (command in commands) {
-            // Packet COMMAND = type(1) + len(2) + id(1) + payload.
+        for ((seq, command) in packets) {
             val commandSize = 4 + command.payload.size
+            val previousSeq = current.lastOrNull()?.first
+            val contiguous =
+                previousSeq == null ||
+                    seq == (previousSeq + 1) % CozmoProtocol.MAX_SEQ
 
             if (
                 current.isNotEmpty() &&
-                payloadSize + commandSize > MAX_ENGINE_PAYLOAD
+                (
+                    !contiguous ||
+                    currentPayloadSize + commandSize > MAX_ENGINE_PAYLOAD
+                )
             ) {
-                result += current
-                current = mutableListOf()
-                payloadSize = 0
+                flush()
             }
 
-            current += command
-            payloadSize += commandSize
+            current += seq to command
+            currentPayloadSize += commandSize
         }
 
-        if (current.isNotEmpty()) {
-            result += current
-        }
-
-        return result
+        flush()
     }
 
     companion object {
-        // PyCozmo utilise 62 entrées. On garde un peu de marge.
-        private const val WINDOW_SIZE = 48
+        // Valeurs de référence PyCozmo.
+        private const val WINDOW_SIZE = 62
+        private const val COLLECT_INTERVAL_MS = 12L
+        private const val ACK_TIMEOUT_NS = 100_000_000L
 
         // 1051 octets de trame - 14 octets d'en-tête.
         private const val MAX_ENGINE_PAYLOAD = 1037
-
-        // PyCozmo : 3 * 1/30 s ~= 100 ms.
-        private const val ACK_TIMEOUT_MS = 100L
-        private const val RETRY_SCAN_MS = 25L
-        private const val MIN_SEND_GAP_MS = 2L
-        private const val MAX_RETRY_BURST = 8
     }
 }
