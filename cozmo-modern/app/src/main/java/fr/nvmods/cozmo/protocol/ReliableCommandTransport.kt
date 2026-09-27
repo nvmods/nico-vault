@@ -122,20 +122,6 @@ internal class ReliableCommandTransport(
         }
     }
 
-    /**
-     * Conservé pour compatibilité avec les appels existants.
-     * La reconstruction 0.8 utilise la même file que PyCozmo : pas de barrière
-     * ACK artificielle entre deux commandes adjacentes.
-     */
-    fun enqueueSequential(
-        commands: List<OutboundCommand>,
-        waitUntilAcknowledged: Boolean = false
-    ) {
-        @Suppress("UNUSED_VARIABLE")
-        val ignoredBarrier = waitUntilAcknowledged
-        enqueueBatch(commands)
-    }
-
     fun acknowledge(ack: Int) {
         if (ack == CozmoProtocol.OOB_SEQ) return
 
