@@ -76,7 +76,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.6.1",
+                        "Cozmo Modern 0.6.2",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -440,6 +440,7 @@ private fun CubeCard(
 
             Text(
                 "type=" + cube.objectType +
+                    "  id=" + (cube.objectId?.toString() ?: "—") +
                     "  RSSI=" + (cube.rssi?.toString() ?: "—") +
                     "  connecté=" + (if (cube.connected) "oui" else "non") +
                     "  batterie=" + (cube.batteryLevel?.toString() ?: "—")
