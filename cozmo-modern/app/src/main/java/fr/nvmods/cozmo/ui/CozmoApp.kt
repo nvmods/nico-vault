@@ -76,7 +76,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.6.2",
+                        "Cozmo Modern 0.7.0",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -389,84 +389,15 @@ private fun VoiceCubeTab(
             )
         }
 
-        ControlCard("Cubes") {
-            ToggleRow(
-                "Recherche / connexion automatique",
-                state.cubeDiscovery,
-                vm::discoverCubes
-            )
-
-            if (state.cubes.isEmpty()) {
-                Text("Aucun cube détecté pour le moment.")
-            } else {
-                Text("Couleur de tous les cubes", fontWeight = FontWeight.Medium)
-                ColorButtons(
-                    current = null,
-                    onColor = vm::allCubeColor
-                )
-
-                state.cubes.forEachIndexed { index, cube ->
-                    CubeCard(
-                        index = index,
-                        cube = cube,
-                        vm = vm
-                    )
-                }
-            }
-        }
+        CubeManagerPanel(
+            state = state,
+            vm = vm
+        )
 
         Text(
             "Les prochaines briques lourdes seront visages/animations et comportements. La couche réseau est maintenant séparée et acquittée.",
             style = MaterialTheme.typography.bodySmall
         )
-    }
-}
-
-@Composable
-private fun CubeCard(
-    index: Int,
-    cube: CubeInfo,
-    vm: CozmoViewModel
-) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(
-            Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                "Cube " + (index + 1) + " — 0x" + cube.factoryId.toString(16),
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Text(
-                "type=" + cube.objectType +
-                    "  id=" + (cube.objectId?.toString() ?: "—") +
-                    "  RSSI=" + (cube.rssi?.toString() ?: "—") +
-                    "  connecté=" + (if (cube.connected) "oui" else "non") +
-                    "  batterie=" + (cube.batteryLevel?.toString() ?: "—")
-            )
-
-            val objectId = cube.objectId
-
-            if (cube.connected && objectId != null) {
-                Text(
-                    "LEDs : " + cube.lightColor.name,
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                ColorButtons(
-                    current = cube.lightColor,
-                    onColor = { color ->
-                        vm.cubeColor(objectId, color)
-                    }
-                )
-            } else {
-                Text(
-                    "Attente de connexion au cube avant pilotage des LEDs.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
     }
 }
 
