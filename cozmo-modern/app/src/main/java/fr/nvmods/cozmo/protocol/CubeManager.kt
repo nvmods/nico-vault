@@ -69,7 +69,6 @@ internal class CubeManager(
     private val lastAccelPublishNanos = ConcurrentHashMap<Long, Long>()
     private val accelWantedFactories = mutableSetOf<Long>()
     private var lastPublishedSnapshot: List<CubeInfo> = emptyList()
-    private val disconnectJobs = mutableMapOf<Long, Job>()
 
     private var discoveryEnabled = false
     private var managerJob: Job? = null
@@ -79,8 +78,6 @@ internal class CubeManager(
     fun reset() {
         managerJob?.cancel()
         managerJob = null
-        disconnectJobs.values.forEach { it.cancel() }
-        disconnectJobs.clear()
         connectWaiter?.cancel()
         connectWaiter = null
 
@@ -175,8 +172,6 @@ internal class CubeManager(
         }
 
         if (connected) {
-            disconnectJobs.remove(factoryId)?.cancel()
-
             var displacedFactoryId: Long? = null
 
             synchronized(lock) {
@@ -220,10 +215,6 @@ internal class CubeManager(
                 )
             }
 
-            displacedFactoryId?.let {
-                disconnectJobs.remove(it)?.cancel()
-            }
-
             if (factoryId in accelWantedFactories) {
                 streamAccelByFactory(factoryId, true)
             }
@@ -232,49 +223,38 @@ internal class CubeManager(
             return
         }
 
-        val wasConnected = synchronized(lock) {
+        var changed = false
+
+        synchronized(lock) {
             if (activeFactoryByObjectId[objectId] == factoryId) {
                 activeFactoryByObjectId.remove(objectId)
             }
 
-            cubesByFactory[factoryId]?.connected == true
-        }
+            val previous =
+                cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
 
-        if (!wasConnected) {
-            synchronized(lock) {
-                val previous =
-                    cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
+            val next = previous.copy(
+                objectId = null,
+                objectType = objectType,
+                connected = false,
+                disconnectCount =
+                    previous.disconnectCount +
+                        if (previous.connected) 1 else 0,
+                lastEvent =
+                    if (previous.connected) {
+                        "Déconnecté"
+                    } else {
+                        "Connexion refusée / inactive"
+                    }
+            )
 
-                cubesByFactory[factoryId] = previous.copy(
-                    objectType = objectType,
-                    connected = false,
-                    lastEvent = "Connexion refusée / inactive"
-                )
+            if (next != previous) {
+                cubesByFactory[factoryId] = next
+                changed = true
             }
-            publish()
-            return
         }
 
-        // Le body peut publier de très brèves transitions false pendant le
-        // scan ou un changement de liaison BLE. Ne pas faire clignoter l'UI
-        // ni lancer immédiatement une tempête de reconnexions.
-        disconnectJobs.remove(factoryId)?.cancel()
-        disconnectJobs[factoryId] = scope.launch {
-            delay(DISCONNECT_DEBOUNCE_MS)
-
-            synchronized(lock) {
-                val current = cubesByFactory[factoryId] ?: return@synchronized
-                if (!current.connected) return@synchronized
-
-                cubesByFactory[factoryId] = current.copy(
-                    connected = false,
-                    disconnectCount = current.disconnectCount + 1,
-                    lastEvent = "Déconnecté"
-                )
-            }
-
-            publish()
-        }
+        if (changed) publish()
     }
 
     fun onObjectPowerLevel(payload: ByteArray) {
@@ -878,10 +858,6 @@ internal class CubeManager(
         private const val AFTER_SCAN_SETTLE_MS = 180L
         private const val RESCAN_DELAY_MS = 800L
         private const val STABLE_POLL_MS = 1_000L
-        // Les transitions false liées au scan BLE peuvent durer plus de 600 ms.
-        // On garde donc l'état UI stable avant de déclarer une vraie coupure.
-        private const val DISCONNECT_DEBOUNCE_MS = 2_000L
-
         // Le RSSI sert au diagnostic, pas au pilotage : 2 Hz suffit et évite
         // de republier toute la liste à chaque publicité BLE reçue.
         private const val RSSI_UI_PERIOD_NS = 500_000_000L
