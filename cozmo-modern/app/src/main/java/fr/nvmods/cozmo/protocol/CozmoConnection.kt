@@ -2,6 +2,7 @@ package fr.nvmods.cozmo.protocol
 
 import android.graphics.Bitmap
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -292,8 +293,16 @@ class CozmoConnection {
             _state.value = _state.value.copy(
                 packetsSent = _state.value.packetsSent + 1
             )
+        } catch (cancelled: CancellationException) {
+            // Une annulation de coroutine (déconnexion, fermeture de l'écran, etc.)
+            // n'est pas une panne réseau. Ne jamais l'afficher comme "UDP TX null".
+            throw cancelled
         } catch (t: Throwable) {
-            if (!sock.isClosed) fail("Erreur UDP TX: " + t.message, t)
+            if (!sock.isClosed) {
+                val type = t::class.java.simpleName.ifBlank { t::class.java.name }
+                val detail = t.message ?: "(aucun message)"
+                fail("Erreur UDP TX [" + type + "] : " + detail, t)
+            }
         }
     }
 
@@ -308,8 +317,14 @@ class CozmoConnection {
                 sock.receive(datagram)
             } catch (_: java.net.SocketTimeoutException) {
                 continue
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
-                if (!sock.isClosed) fail("Erreur UDP RX: " + t.message, t)
+                if (!sock.isClosed) {
+                    val type = t::class.java.simpleName.ifBlank { t::class.java.name }
+                    val detail = t.message ?: "(aucun message)"
+                    fail("Erreur UDP RX [" + type + "] : " + detail, t)
+                }
                 break
             }
 
