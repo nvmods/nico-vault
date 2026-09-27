@@ -20,10 +20,20 @@ enum class CubeUpAxis(val raw: Int, val label: String) {
     UNKNOWN(7, "?");
 
     companion object {
-        fun fromRaw(value: Int): CubeUpAxis =
-            entries.firstOrNull { it.raw == value } ?: UNKNOWN
-    }
-}
+        private const val CONNECT_TIMEOUT_MS = 2_500L
+        private const val BETWEEN_CONNECTS_MS = 220L
+        private const val AVAILABLE_MAX_AGE_NS = 8_000_000_000L
+
+        private const val SCAN_WINDOW_MS = 1_500L
+        private const val AFTER_SCAN_SETTLE_MS = 180L
+        private const val RESCAN_DELAY_MS = 800L
+        private const val STABLE_POLL_MS = 1_000L
+        private const val DISCONNECT_DEBOUNCE_MS = 600L
+
+        // 10 Hz suffit largement pour l'affichage et évite de recomposer toute
+        // l'UI à chaque paquet accéléromètre (~33 Hz par cube).
+        private const val ACCEL_UI_PERIOD_NS = 100_000_000L
+    }}
 
 data class CubeInfo(
     val factoryId: Long,
@@ -34,6 +44,7 @@ data class CubeInfo(
     val batteryLevel: Int? = null,
     val missedPackets: Long? = null,
     val connectAttempts: Int = 0,
+    val disconnectCount: Int = 0,
     val ledColors: List<BackpackColor> = List(4) { BackpackColor.OFF },
     val accelStreaming: Boolean = false,
     val accelX: Float? = null,
@@ -64,16 +75,20 @@ internal class CubeManager(
     private val lock = Any()
     private val cubesByFactory = linkedMapOf<Long, CubeInfo>()
     private val lastSeenNanos = ConcurrentHashMap<Long, Long>()
+    private val lastAccelPublishNanos = ConcurrentHashMap<Long, Long>()
     private val accelWantedFactories = mutableSetOf<Long>()
+    private val disconnectJobs = mutableMapOf<Long, Job>()
 
     private var discoveryEnabled = false
-    private var connectorJob: Job? = null
+    private var managerJob: Job? = null
     private var connectingFactoryId: Long? = null
     private var connectWaiter: CompletableDeferred<Boolean>? = null
 
     fun reset() {
-        connectorJob?.cancel()
-        connectorJob = null
+        managerJob?.cancel()
+        managerJob = null
+        disconnectJobs.values.forEach { it.cancel() }
+        disconnectJobs.clear()
         connectWaiter?.cancel()
         connectWaiter = null
 
@@ -84,25 +99,28 @@ internal class CubeManager(
         }
 
         lastSeenNanos.clear()
+        lastAccelPublishNanos.clear()
         publish()
     }
 
     fun setDiscovery(enabled: Boolean) {
         discoveryEnabled = enabled
 
-        sendCommand(
-            0x0a,
-            byteArrayOf((if (enabled) 1 else 0).toByte())
-        )
-
         if (enabled) {
-            ensureConnector()
+            ensureManager()
         } else {
-            connectorJob?.cancel()
-            connectorJob = null
+            managerJob?.cancel()
+            managerJob = null
+
+            sendCommand(
+                0x0a,
+                byteArrayOf(0)
+            )
+
             synchronized(lock) {
                 connectingFactoryId = null
             }
+
             connectWaiter?.cancel()
             connectWaiter = null
         }
@@ -131,10 +149,6 @@ internal class CubeManager(
         }
 
         publish()
-
-        if (discoveryEnabled) {
-            ensureConnector()
-        }
     }
 
     fun onObjectConnectionState(payload: ByteArray) {
@@ -146,33 +160,71 @@ internal class CubeManager(
         val objectType = b.int
         val connected = b.get().toInt() != 0
 
-        synchronized(lock) {
-            val previous =
-                cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
-
-            cubesByFactory[factoryId] = previous.copy(
-                objectId = if (connected) objectId else null,
-                objectType = objectType,
-                connected = connected,
-                accelStreaming =
-                    if (connected) previous.accelStreaming else false,
-                lastEvent =
-                    if (connected) "Connecté" else "Déconnecté"
-            )
-        }
-
         if (connectingFactoryId == factoryId) {
             connectWaiter?.complete(connected)
         }
 
-        if (connected && factoryId in accelWantedFactories) {
-            streamAccelByFactory(factoryId, true)
+        if (connected) {
+            disconnectJobs.remove(factoryId)?.cancel()
+
+            synchronized(lock) {
+                val previous =
+                    cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
+
+                cubesByFactory[factoryId] = previous.copy(
+                    objectId = objectId,
+                    objectType = objectType,
+                    connected = true,
+                    lastEvent = "Connecté"
+                )
+            }
+
+            if (factoryId in accelWantedFactories) {
+                streamAccelByFactory(factoryId, true)
+            }
+
+            publish()
+            return
         }
 
-        publish()
+        val wasConnected = synchronized(lock) {
+            cubesByFactory[factoryId]?.connected == true
+        }
 
-        if (discoveryEnabled) {
-            ensureConnector()
+        if (!wasConnected) {
+            synchronized(lock) {
+                val previous =
+                    cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
+
+                cubesByFactory[factoryId] = previous.copy(
+                    objectType = objectType,
+                    connected = false,
+                    lastEvent = "Connexion refusée / inactive"
+                )
+            }
+            publish()
+            return
+        }
+
+        // Le body peut publier de très brèves transitions false pendant le
+        // scan ou un changement de liaison BLE. Ne pas faire clignoter l'UI
+        // ni lancer immédiatement une tempête de reconnexions.
+        disconnectJobs.remove(factoryId)?.cancel()
+        disconnectJobs[factoryId] = scope.launch {
+            delay(DISCONNECT_DEBOUNCE_MS)
+
+            synchronized(lock) {
+                val current = cubesByFactory[factoryId] ?: return@synchronized
+                if (!current.connected) return@synchronized
+
+                cubesByFactory[factoryId] = current.copy(
+                    connected = false,
+                    disconnectCount = current.disconnectCount + 1,
+                    lastEvent = "Déconnecté"
+                )
+            }
+
+            publish()
         }
     }
 
@@ -202,12 +254,23 @@ internal class CubeManager(
         val y = b.float
         val z = b.float
 
-        updateByObjectId(objectId) {
+        val now = System.nanoTime()
+        val last = lastAccelPublishNanos[objectId] ?: 0L
+        val publishNow = now - last >= ACCEL_UI_PERIOD_NS
+
+        updateByObjectId(
+            objectId = objectId,
+            publishChanges = publishNow
+        ) {
             it.copy(
                 accelX = x,
                 accelY = y,
                 accelZ = z
             )
+        }
+
+        if (publishNow) {
+            lastAccelPublishNanos[objectId] = now
         }
     }
 
@@ -501,69 +564,87 @@ internal class CubeManager(
         }
     }
 
-    private fun ensureConnector() {
+    private fun ensureManager() {
         if (!discoveryEnabled) return
-        if (connectorJob?.isActive == true) return
+        if (managerJob?.isActive == true) return
 
-        connectorJob = scope.launch {
+        managerJob = scope.launch {
             while (discoveryEnabled) {
-                val candidate = chooseConnectCandidate()
+                val connectedCount = synchronized(lock) {
+                    cubesByFactory.values.count { it.connected }
+                }
 
-                if (candidate == null) {
-                    delay(250)
+                if (connectedCount >= 3) {
+                    // Une fois les trois cubes établis, couper le scan BLE.
+                    // Cela évite les micro-coupures observées quand scan et
+                    // liaisons actives tournent simultanément.
+                    sendCommand(0x0a, byteArrayOf(0))
+                    delay(STABLE_POLL_MS)
                     continue
                 }
 
-                val waiter = CompletableDeferred<Boolean>()
-                connectWaiter = waiter
+                // Phase 1 : scan court, sans tenter de connexion en parallèle.
+                sendCommand(0x0a, byteArrayOf(1))
+                delay(SCAN_WINDOW_MS)
+                sendCommand(0x0a, byteArrayOf(0))
+                delay(AFTER_SCAN_SETTLE_MS)
 
-                synchronized(lock) {
-                    connectingFactoryId = candidate.factoryId
-                    cubesByFactory[candidate.factoryId] =
-                        candidate.copy(
-                            connectAttempts = candidate.connectAttempts + 1,
-                            lastEvent = "Connexion BLE…"
-                        )
-                }
-                publish()
+                // Phase 2 : connecter les objets vus, strictement un par un.
+                while (discoveryEnabled) {
+                    val candidate = chooseConnectCandidate() ?: break
+                    val waiter = CompletableDeferred<Boolean>()
+                    connectWaiter = waiter
 
-                val payload = ByteBuffer.allocate(5)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .putInt(candidate.factoryId.toInt())
-                    .put(1.toByte())
-                    .array()
-
-                sendCommand(0x05, payload)
-
-                val result =
-                    withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
-                        waiter.await()
+                    synchronized(lock) {
+                        connectingFactoryId = candidate.factoryId
+                        cubesByFactory[candidate.factoryId] =
+                            candidate.copy(
+                                connectAttempts = candidate.connectAttempts + 1,
+                                lastEvent = "Connexion BLE…"
+                            )
                     }
+                    publish()
 
-                synchronized(lock) {
-                    if (connectingFactoryId == candidate.factoryId) {
-                        connectingFactoryId = null
-                    }
+                    val payload = ByteBuffer.allocate(5)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putInt(candidate.factoryId.toInt())
+                        .put(1.toByte())
+                        .array()
 
-                    if (result != true) {
-                        val current = cubesByFactory[candidate.factoryId]
-                        if (current != null && !current.connected) {
-                            cubesByFactory[candidate.factoryId] =
-                                current.copy(
-                                    lastEvent =
-                                        if (result == false) {
-                                            "Connexion refusée"
-                                        } else {
-                                            "Timeout connexion"
-                                        }
-                                )
+                    sendCommand(0x05, payload)
+
+                    val result =
+                        withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+                            waiter.await()
+                        }
+
+                    synchronized(lock) {
+                        if (connectingFactoryId == candidate.factoryId) {
+                            connectingFactoryId = null
+                        }
+
+                        if (result != true) {
+                            val current = cubesByFactory[candidate.factoryId]
+                            if (current != null && !current.connected) {
+                                cubesByFactory[candidate.factoryId] =
+                                    current.copy(
+                                        lastEvent =
+                                            if (result == false) {
+                                                "Connexion refusée"
+                                            } else {
+                                                "Timeout connexion"
+                                            }
+                                    )
+                            }
                         }
                     }
+
+                    connectWaiter = null
+                    publish()
+                    delay(BETWEEN_CONNECTS_MS)
                 }
 
-                connectWaiter = null
-                publish()
-                delay(BETWEEN_CONNECTS_MS)
+                delay(RESCAN_DELAY_MS)
             }
         }
     }
@@ -596,6 +677,7 @@ internal class CubeManager(
 
     private fun updateByObjectId(
         objectId: Long,
+        publishChanges: Boolean = true,
         transform: (CubeInfo) -> CubeInfo
     ) {
         var changed = false
@@ -612,7 +694,7 @@ internal class CubeManager(
             }
         }
 
-        if (changed) publish()
+        if (changed && publishChanges) publish()
     }
 
     private fun cubeIdPayload(
