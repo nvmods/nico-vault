@@ -12,15 +12,25 @@ android {
         applicationId = "fr.nvmods.cozmo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 5
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("modernTest") {
+            storeFile = rootProject.file("cozmo-modern-test.jks")
+            storePassword = "cozmo-v6-test"
+            keyAlias = "cozmo-v6"
+            keyPassword = "cozmo-v6-test"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("modernTest")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
