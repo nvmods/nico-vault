@@ -60,9 +60,13 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun backpack(color: BackpackColor) = connection.setBackpackColor(color)
 
+    fun cubeColor(objectId: Long, color: BackpackColor) = connection.setCubeColor(objectId, color)
+
+    fun allCubeColor(color: BackpackColor) = connection.setAllCubeColor(color)
+
     fun volume(percent: Float) = connection.setRobotVolume(percent)
 
-    fun speak(text: String, french: Boolean) {
+    fun speak(text: String, french: Boolean, pitch: Float, rate: Float) {
         if (text.isBlank()) return
 
         viewModelScope.launch {
@@ -70,7 +74,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
                 _speechStatus.value = "Synthèse…"
 
                 val locale = if (french) Locale.FRANCE else Locale.US
-                val pcm = speech.synthesize(text, locale)
+                val pcm = speech.synthesize(text, locale, pitch, rate)
 
                 _speechStatus.value = "Envoi vers Cozmo…"
                 connection.playPcm22050(pcm)
