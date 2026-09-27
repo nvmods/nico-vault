@@ -446,17 +446,6 @@ class CozmoConnection {
         reliableTransport?.enqueueBatch(commands)
     }
 
-    private fun sendSequential(
-        commands: List<OutboundCommand>,
-        waitUntilAcknowledged: Boolean = false
-    ) {
-        if (socket == null) return
-        reliableTransport?.enqueueSequential(
-            commands = commands,
-            waitUntilAcknowledged = waitUntilAcknowledged
-        )
-    }
-
     private suspend fun sendFrameNow(bytes: ByteArray) {
         val sock = socket ?: return
         val address = robotAddress ?: return
