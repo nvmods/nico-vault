@@ -92,8 +92,9 @@ jobs:
       - name: Apply Android compatibility manifest patch
         run: |
           set -euxo pipefail
-          python3 cozmo-v3/patch_manifest.py work/decompiled/AndroidManifest.xml
-          grep -E 'uses-sdk|targetSdkVersion|allowNativeHeapPointerTagging|requestLegacyExternalStorage' work/decompiled/AndroidManifest.xml
+          python3 cozmo-v3/patch_manifest.py work/decompiled/AndroidManifest.xml work/decompiled/apktool.yml
+          grep -E 'allowNativeHeapPointerTagging|requestLegacyExternalStorage' work/decompiled/AndroidManifest.xml
+          grep -E 'minSdkVersion|targetSdkVersion' work/decompiled/apktool.yml
 
       - name: Patch Acapela ARM64 strerror recursion
         run: |
