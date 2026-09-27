@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.DatagramPacket
@@ -287,15 +288,19 @@ class CozmoConnection {
         val address = robotAddress ?: return
 
         try {
-            sendMutex.withLock {
-                sock.send(DatagramPacket(bytes, bytes.size, address))
+            // connect() est appelé depuis viewModelScope (Main). Le RESET initial
+            // passe donc aussi par cette fonction : forcer TOUT envoi UDP sur IO
+            // évite NetworkOnMainThreadException sur Android récent.
+            withContext(Dispatchers.IO) {
+                sendMutex.withLock {
+                    sock.send(DatagramPacket(bytes, bytes.size, address))
+                }
             }
+
             _state.value = _state.value.copy(
                 packetsSent = _state.value.packetsSent + 1
             )
         } catch (cancelled: CancellationException) {
-            // Une annulation de coroutine (déconnexion, fermeture de l'écran, etc.)
-            // n'est pas une panne réseau. Ne jamais l'afficher comme "UDP TX null".
             throw cancelled
         } catch (t: Throwable) {
             if (!sock.isClosed) {
