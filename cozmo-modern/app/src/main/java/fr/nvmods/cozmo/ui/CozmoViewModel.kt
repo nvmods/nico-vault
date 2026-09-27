@@ -60,9 +60,57 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun backpack(color: BackpackColor) = connection.setBackpackColor(color)
 
-    fun cubeColor(objectId: Long, color: BackpackColor) = connection.setCubeColor(objectId, color)
+    fun cubeColor(
+        objectId: Long,
+        color: BackpackColor
+    ) = connection.setCubeColor(objectId, color)
 
-    fun allCubeColor(color: BackpackColor) = connection.setAllCubeColor(color)
+    fun allCubeColor(color: BackpackColor) =
+        connection.setAllCubeColor(color)
+
+    fun cubePairPattern(
+        objectId: Long,
+        first: BackpackColor,
+        second: BackpackColor
+    ) = connection.setCubePairPattern(
+        objectId,
+        first,
+        second
+    )
+
+    fun allCubePairPattern(
+        first: BackpackColor,
+        second: BackpackColor
+    ) = connection.setAllCubePairPattern(first, second)
+
+    fun cubeCornerColor(
+        objectId: Long,
+        corner: Int,
+        color: BackpackColor
+    ) = connection.setCubeCornerColor(
+        objectId,
+        corner,
+        color
+    )
+
+    fun cubeAccel(
+        objectId: Long,
+        enabled: Boolean
+    ) = connection.setCubeAccelStreaming(
+        objectId,
+        enabled
+    )
+
+    fun allCubeAccel(enabled: Boolean) =
+        connection.setAllCubeAccelStreaming(enabled)
+
+    fun cubeChaser(
+        objectId: Long,
+        color: BackpackColor
+    ) = connection.startCubeChaser(objectId, color)
+
+    fun stopCubeChaser(objectId: Long) =
+        connection.stopCubeChaser(objectId)
 
     fun volume(percent: Float) = connection.setRobotVolume(percent)
 
