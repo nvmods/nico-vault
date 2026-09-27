@@ -160,41 +160,51 @@ class PersonalityEngine(
             is PersonalityEvent.FaceDetected -> listOf(
                 RobotAction.Stop,
                 RobotAction.MoveHead(1.0f, 220),
+                RobotAction.PlaySound(PersonalitySoundCue.GREETING),
                 RobotAction.PlayAnimation("greeting"),
                 RobotAction.Backpack(PersonalityLight.BLUE)
             )
 
             is PersonalityEvent.CubeDetected -> listOf(
                 RobotAction.MoveHead(-0.6f, 180),
+                RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
                 RobotAction.PlayAnimation("cube_interest")
             )
 
             PersonalityEvent.PickedUp -> listOf(
                 RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.PICKED_UP),
                 RobotAction.PlayAnimation("picked_up")
             )
 
             PersonalityEvent.PutDown -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.PUT_DOWN),
                 RobotAction.PlayAnimation("put_down")
             )
 
             PersonalityEvent.Touched -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
                 RobotAction.PlayAnimation("happy_small")
             )
 
             PersonalityEvent.UserInteraction -> {
                 if (state.mode == PersonalityMode.JOUEUR) {
                     listOf(
+                        RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
                         RobotAction.PlayAnimation("playful_invite"),
                         RobotAction.Backpack(PersonalityLight.GREEN)
                     )
                 } else {
-                    listOf(RobotAction.PlayAnimation("acknowledge"))
+                    listOf(
+                        RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                        RobotAction.PlayAnimation("acknowledge")
+                    )
                 }
             }
 
             PersonalityEvent.BatteryLow -> listOf(
                 RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.LOW_ENERGY),
                 RobotAction.PlayAnimation("low_energy")
             )
 
@@ -230,11 +240,13 @@ class PersonalityEngine(
 
         return if (state.cubeVisible) {
             listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
                 RobotAction.PlayAnimation("cube_interest"),
                 RobotAction.MoveHead(-0.45f, 180)
             )
         } else {
             listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.BORED),
                 RobotAction.MoveHead(0.55f, 150),
                 RobotAction.Wait(120),
                 RobotAction.MoveHead(-0.55f, 300),
