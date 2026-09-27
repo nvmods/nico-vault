@@ -16,7 +16,8 @@ internal data class OutboundCommand(
 
 private data class OutboundBatch(
     val commands: List<OutboundCommand>,
-    val combineIntoFrame: Boolean
+    val combineIntoFrame: Boolean,
+    val waitUntilAcknowledged: Boolean = false
 )
 
 /**
@@ -71,6 +72,8 @@ internal class ReliableCommandTransport(
                         batch.commands.map { listOf(it) }
                     }
 
+                var batchLastSeq: Int? = null
+
                 for (commands in groups) {
                     waitForWindowSlots(commands.size)
 
@@ -102,8 +105,13 @@ internal class ReliableCommandTransport(
                         )
                     }
 
+                    batchLastSeq = lastSeq
                     sendRaw(frame)
                     delay(MIN_SEND_GAP_MS)
+                }
+
+                if (batch.waitUntilAcknowledged) {
+                    batchLastSeq?.let { waitUntilAcked(it) }
                 }
             }
         }
@@ -136,12 +144,16 @@ internal class ReliableCommandTransport(
         }
     }
 
-    fun enqueueSequential(commands: List<OutboundCommand>) {
+    fun enqueueSequential(
+        commands: List<OutboundCommand>,
+        waitUntilAcknowledged: Boolean = false
+    ) {
         if (commands.isNotEmpty()) {
             queue.trySend(
                 OutboundBatch(
                     commands = commands,
-                    combineIntoFrame = false
+                    combineIntoFrame = false,
+                    waitUntilAcknowledged = waitUntilAcknowledged
                 )
             )
         }
@@ -185,6 +197,18 @@ internal class ReliableCommandTransport(
         queue.close()
         windowChanged.close()
         pending.clear()
+    }
+
+    private suspend fun waitUntilAcked(lastSeq: Int) {
+        while (true) {
+            val done = pendingMutex.withLock {
+                !pending.containsKey(lastSeq)
+            }
+
+            if (done) return
+
+            windowChanged.receive()
+        }
     }
 
     private suspend fun waitForWindowSlots(required: Int) {
