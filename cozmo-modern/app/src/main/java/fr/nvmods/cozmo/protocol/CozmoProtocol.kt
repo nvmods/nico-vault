@@ -73,14 +73,48 @@ object CozmoProtocol {
         )
     }
 
-    fun commandFrame(seq: Int, ack: Int, commandId: Int, payload: ByteArray = byteArrayOf()): ByteArray =
-        encodeFrame(
-            type = FrameType.ENGINE,
+    fun commandFrame(
+        seq: Int,
+        ack: Int,
+        commandId: Int,
+        payload: ByteArray = byteArrayOf()
+    ): ByteArray =
+        commandFrame(
             firstSeq = seq,
-            seq = seq,
             ack = ack,
-            packets = listOf(Packet(PacketType.COMMAND, commandId, payload))
+            commands = listOf(commandId to payload)
         )
+
+    /**
+     * Encode plusieurs commandes dans UNE trame ENGINE.
+     *
+     * C'est important pour les opérations qui ont une sémantique atomique côté
+     * robot, notamment CubeId + CubeLights : une retransmission doit conserver
+     * la sélection du cube et sa commande d'éclairage dans la même trame.
+     */
+    fun commandFrame(
+        firstSeq: Int,
+        ack: Int,
+        commands: List<Pair<Int, ByteArray>>
+    ): ByteArray {
+        require(commands.isNotEmpty()) { "Au moins une commande est requise" }
+
+        val lastSeq = (firstSeq + commands.size - 1) % MAX_SEQ
+
+        return encodeFrame(
+            type = FrameType.ENGINE,
+            firstSeq = firstSeq,
+            seq = lastSeq,
+            ack = ack,
+            packets = commands.map { (id, payload) ->
+                Packet(
+                    type = PacketType.COMMAND,
+                    id = id,
+                    payload = payload
+                )
+            }
+        )
+    }
 
     fun encodeFrame(
         type: FrameType,
