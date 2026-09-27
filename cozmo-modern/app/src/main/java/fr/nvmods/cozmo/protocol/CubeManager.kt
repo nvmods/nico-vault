@@ -103,11 +103,9 @@ internal class CubeManager(
             managerJob?.cancel()
             managerJob = null
 
-            sendCommand(
-                0x0a,
-                byteArrayOf(0)
-            )
-
+            // Ne pas piloter SetAccessoryDiscovery (0x0a) ici.
+            // Les implémentations de référence reçoivent ObjectAvailable
+            // spontanément et ne basculent pas la radio BLE entre les connexions.
             synchronized(lock) {
                 connectingFactoryId = null
             }
@@ -614,39 +612,18 @@ internal class CubeManager(
 
         managerJob = scope.launch {
             while (discoveryEnabled) {
-                val connectedCount = connectedFactoryIds().size
+                // Le body annonce périodiquement les accessoires par
+                // ObjectAvailable. On ne force plus aucun cycle de scan radio.
+                // On se contente de connecter, un par un, les cubes fraîchement
+                // annoncés et non déjà liés.
+                val candidate = chooseConnectCandidate()
 
-                if (connectedCount >= 3) {
-                    // Une fois les trois cubes établis, couper le scan BLE.
-                    sendCommand(0x0a, byteArrayOf(0))
-                    delay(STABLE_POLL_MS)
-                    continue
-                }
-
-                // Si un cube déjà connu vient de tomber, tenter d'abord une
-                // reconnexion directe par factory_id. Cela évite de relancer
-                // le scan BLE qui peut perturber les autres liens actifs.
-                val reconnectCandidate = chooseConnectCandidate()
-                if (reconnectCandidate != null) {
-                    attemptConnect(reconnectCandidate)
-                    delay(BETWEEN_CONNECTS_MS)
-                    continue
-                }
-
-                // Aucun cube récemment connu à reconnecter : scan court.
-                sendCommand(0x0a, byteArrayOf(1))
-                delay(SCAN_WINDOW_MS)
-                sendCommand(0x0a, byteArrayOf(0))
-                delay(AFTER_SCAN_SETTLE_MS)
-
-                // Puis connecter strictement un par un les objets annoncés.
-                while (discoveryEnabled) {
-                    val candidate = chooseConnectCandidate() ?: break
+                if (candidate != null) {
                     attemptConnect(candidate)
                     delay(BETWEEN_CONNECTS_MS)
+                } else {
+                    delay(IDLE_CONNECT_POLL_MS)
                 }
-
-                delay(RESCAN_DELAY_MS)
             }
         }
     }
@@ -874,10 +851,9 @@ internal class CubeManager(
         private const val BETWEEN_CONNECTS_MS = 220L
         private const val AVAILABLE_MAX_AGE_NS = 8_000_000_000L
 
-        private const val SCAN_WINDOW_MS = 1_500L
-        private const val AFTER_SCAN_SETTLE_MS = 180L
-        private const val RESCAN_DELAY_MS = 800L
-        private const val STABLE_POLL_MS = 1_000L
+        // Le manager ne pilote plus la découverte radio : il attend les
+        // ObjectAvailable spontanés du body et ne gère que les connexions.
+        private const val IDLE_CONNECT_POLL_MS = 250L
         // Le RSSI sert au diagnostic, pas au pilotage : 2 Hz suffit et évite
         // de republier toute la liste à chaque publicité BLE reçue.
         private const val RSSI_UI_PERIOD_NS = 500_000_000L
