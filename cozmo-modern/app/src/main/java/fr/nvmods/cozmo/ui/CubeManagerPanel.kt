@@ -143,6 +143,7 @@ private fun CubeDetailCard(
             Text(
                 "BLE=" + (if (cube.connected) "connecté" else "déconnecté") +
                     " • essais=" + cube.connectAttempts +
+                    " • coupures=" + cube.disconnectCount +
                     " • batterie=" + (cube.batteryLevel?.toString() ?: "—") +
                     " • paquets manqués=" + (cube.missedPackets?.toString() ?: "—"),
                 style = MaterialTheme.typography.bodySmall
@@ -155,12 +156,20 @@ private fun CubeDetailCard(
 
             val objectId = cube.objectId
 
-            if (!cube.connected || objectId == null) {
+            if (objectId == null) {
                 Text(
-                    "En attente d'une connexion BLE active avant pilotage.",
+                    "En attente du premier object_id attribué par Cozmo.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 return@Column
+            }
+
+            if (!cube.connected) {
+                Text(
+                    "Lien BLE momentanément instable : les commandes restent visibles pour éviter le clignotement de l'UI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             Text(
