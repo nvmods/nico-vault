@@ -334,7 +334,7 @@ class CozmoConnection {
             var offset = 0
 
             val frameDurationNanos =
-                744L * 1_000_000_000L / 22_050L
+                CozmoAudioCodec.packetDurationNanos()
 
             val streamStart = System.nanoTime()
             var frameIndex = 0L
@@ -343,12 +343,16 @@ class CozmoConnection {
                 // PyCozmo laisse le reste du dernier paquet à 0.
                 // Le codec Cozmo n'utilise PAS le mapping μ-law téléphonie
                 // standard où 0xff représente le silence.
-                val payload = ByteArray(744)
-                val count = minOf(744, samples.size - offset)
+                val payload =
+                    CozmoAudioCodec.encodePacket(
+                        samples = samples,
+                        offset = offset
+                    )
 
-                for (i in 0 until count) {
-                    payload[i] = muLaw(samples[offset + i])
-                }
+                val count = minOf(
+                    CozmoAudioCodec.SAMPLES_PER_PACKET,
+                    samples.size - offset
+                )
 
                 sendCommand(0x8e, payload)
                 offset += count
@@ -386,35 +390,6 @@ class CozmoConnection {
             .put(0)
             .putShort(0)
             .array()
-    }
-
-    private fun muLaw(input: Short): Byte {
-        var sample = input.toInt()
-        var sign = 0
-
-        if (sample < 0) {
-            sample = -sample
-            sign = 0x80
-        }
-
-        sample = (sample + 132).coerceAtMost(0x7fff)
-
-        var mask = 0x4000
-        var position = 14
-
-        while ((sample and mask) != mask && position >= 7) {
-            mask = mask ushr 1
-            position--
-        }
-
-        val lsb = (sample shr (position - 4)) and 0x0f
-        val value = sign or ((position - 7) shl 4) or lsb
-
-        // IMPORTANT : Cozmo n'attend pas le byte μ-law G.711 standard.
-        // Le code validé par PyCozmo renvoie -(~value), soit value + 1.
-        // Notre ancienne inversion (~value) expliquait une voix très
-        // déformée malgré la bonne fréquence de 22,05 kHz.
-        return ((value + 1) and 0xff).toByte()
     }
 
     private fun initializeAfterFirmwareSignature() {
