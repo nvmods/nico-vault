@@ -14,6 +14,11 @@ internal data class OutboundCommand(
     val payload: ByteArray = byteArrayOf()
 )
 
+private data class OutboundBatch(
+    val commands: List<OutboundCommand>,
+    val combineIntoFrame: Boolean
+)
+
 /**
  * Transport fiable pour les commandes ENGINE Cozmo.
  *
@@ -21,10 +26,13 @@ internal data class OutboundCommand(
  * - file unique d'émission ;
  * - fenêtre de séquences acquittées ;
  * - retransmission des trames complètes ;
- * - un batch logique est encodé dans UNE trame ENGINE quand il tient dedans.
+ * - un batch peut être combiné dans une trame ENGINE ou forcé en trames
+ *   séparées tout en conservant strictement l'ordre.
  *
- * Ce dernier point est particulièrement important pour CubeId + CubeLights :
- * retransmettre séparément ces deux commandes peut faire viser le mauvais cube.
+ * CubeId + CubeLights est un cas particulier : PyCozmo les envoie dans deux
+ * trames successives. Le firmware semble appliquer la sélection de cube avant
+ * la trame suivante ; les combiner peut donc éclairer le cube précédemment
+ * sélectionné.
  */
 internal class ReliableCommandTransport(
     private val scope: CoroutineScope,
@@ -41,7 +49,7 @@ internal class ReliableCommandTransport(
         var attempts: Int
     )
 
-    private val queue = Channel<List<OutboundCommand>>(Channel.UNLIMITED)
+    private val queue = Channel<OutboundBatch>(Channel.UNLIMITED)
     private val pendingMutex = Mutex()
     private val pending = LinkedHashMap<Int, PendingFrame>()
     private val windowChanged = Channel<Unit>(Channel.CONFLATED)
@@ -56,7 +64,12 @@ internal class ReliableCommandTransport(
 
         sendJob = scope.launch {
             for (batch in queue) {
-                val groups = splitForFrame(batch)
+                val groups =
+                    if (batch.combineIntoFrame) {
+                        splitForFrame(batch.commands)
+                    } else {
+                        batch.commands.map { listOf(it) }
+                    }
 
                 for (commands in groups) {
                     waitForWindowSlots(commands.size)
@@ -104,12 +117,33 @@ internal class ReliableCommandTransport(
     }
 
     fun enqueue(command: OutboundCommand) {
-        queue.trySend(listOf(command))
+        queue.trySend(
+            OutboundBatch(
+                commands = listOf(command),
+                combineIntoFrame = false
+            )
+        )
     }
 
     fun enqueueBatch(commands: List<OutboundCommand>) {
         if (commands.isNotEmpty()) {
-            queue.trySend(commands)
+            queue.trySend(
+                OutboundBatch(
+                    commands = commands,
+                    combineIntoFrame = true
+                )
+            )
+        }
+    }
+
+    fun enqueueSequential(commands: List<OutboundCommand>) {
+        if (commands.isNotEmpty()) {
+            queue.trySend(
+                OutboundBatch(
+                    commands = commands,
+                    combineIntoFrame = false
+                )
+            )
         }
     }
 
