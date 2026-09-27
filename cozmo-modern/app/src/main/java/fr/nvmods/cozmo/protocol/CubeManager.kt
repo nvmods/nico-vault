@@ -64,6 +64,9 @@ internal class CubeManager(
 ) {
     private val lock = Any()
     private val cubesByFactory = linkedMapOf<Long, CubeInfo>()
+    // Routage strict des événements ENGINE : un object_id ne peut avoir
+    // qu'un seul propriétaire physique (factory_id) à un instant donné.
+    private val activeFactoryByObjectId = mutableMapOf<Long, Long>()
     private val lastSeenNanos = ConcurrentHashMap<Long, Long>()
     private val lastAdvertPublishNanos = ConcurrentHashMap<Long, Long>()
     private val lastAccelPublishNanos = ConcurrentHashMap<Long, Long>()
@@ -86,6 +89,7 @@ internal class CubeManager(
 
         synchronized(lock) {
             cubesByFactory.clear()
+            activeFactoryByObjectId.clear()
             accelWantedFactories.clear()
             connectingFactoryId = null
         }
@@ -176,9 +180,40 @@ internal class CubeManager(
         if (connected) {
             disconnectJobs.remove(factoryId)?.cancel()
 
+            var displacedFactoryId: Long? = null
+
             synchronized(lock) {
                 val previous =
                     cubesByFactory[factoryId] ?: CubeInfo(factoryId = factoryId)
+
+                // Si Cozmo réattribue un object_id après une micro-coupure,
+                // retirer immédiatement l'ancien propriétaire. Sans cela deux
+                // cartes peuvent pointer vers le même cube physique.
+                val oldOwner = activeFactoryByObjectId[objectId]
+                if (oldOwner != null && oldOwner != factoryId) {
+                    displacedFactoryId = oldOwner
+                    val displaced = cubesByFactory[oldOwner]
+                    if (displaced != null) {
+                        cubesByFactory[oldOwner] = displaced.copy(
+                            objectId = null,
+                            connected = false,
+                            lastEvent = "object_id réattribué — reconnexion"
+                        )
+                    }
+                }
+
+                // Le même factory_id peut aussi recevoir un nouvel object_id.
+                val previousObjectId = previous.objectId
+                if (
+                    previousObjectId != null &&
+                    previousObjectId != objectId &&
+                    activeFactoryByObjectId[previousObjectId] == factoryId
+                ) {
+                    activeFactoryByObjectId.remove(previousObjectId)
+                }
+
+                activeFactoryByObjectId[objectId] = factoryId
+                lastSeenNanos[factoryId] = System.nanoTime()
 
                 cubesByFactory[factoryId] = previous.copy(
                     objectId = objectId,
@@ -186,6 +221,10 @@ internal class CubeManager(
                     connected = true,
                     lastEvent = "Connecté"
                 )
+            }
+
+            displacedFactoryId?.let {
+                disconnectJobs.remove(it)?.cancel()
             }
 
             if (factoryId in accelWantedFactories) {
@@ -197,6 +236,10 @@ internal class CubeManager(
         }
 
         val wasConnected = synchronized(lock) {
+            if (activeFactoryByObjectId[objectId] == factoryId) {
+                activeFactoryByObjectId.remove(objectId)
+            }
+
             cubesByFactory[factoryId]?.connected == true
         }
 
@@ -375,13 +418,7 @@ internal class CubeManager(
         }
     }
 
-    fun setAccelStreaming(objectId: Long, enabled: Boolean) {
-        val factoryId = synchronized(lock) {
-            cubesByFactory.entries
-                .firstOrNull { it.value.objectId == objectId }
-                ?.key
-        } ?: return
-
+    fun setAccelStreaming(factoryId: Long, enabled: Boolean) {
         synchronized(lock) {
             if (enabled) {
                 accelWantedFactories += factoryId
@@ -394,45 +431,39 @@ internal class CubeManager(
     }
 
     fun setAllAccelStreaming(enabled: Boolean) {
-        val connected = synchronized(lock) {
-            cubesByFactory.values
-                .filter { it.connected && it.objectId != null }
-                .mapNotNull { it.objectId }
-        }
-
-        connected.forEach { objectId ->
-            setAccelStreaming(objectId, enabled)
-        }
+        connectedFactoryIds()
+            .forEach { factoryId ->
+                setAccelStreaming(factoryId, enabled)
+            }
     }
 
-    fun setSolidColor(objectId: Long, color: BackpackColor) {
+    fun setSolidColor(factoryId: Long, color: BackpackColor) {
         setLights(
-            objectId = objectId,
+            factoryId = factoryId,
             colors = List(4) { color }
         )
     }
 
     fun setPairPattern(
-        objectId: Long,
+        factoryId: Long,
         first: BackpackColor,
         second: BackpackColor
     ) {
         setLights(
-            objectId = objectId,
+            factoryId = factoryId,
             colors = listOf(first, second, first, second)
         )
     }
 
     fun setCornerColor(
-        objectId: Long,
+        factoryId: Long,
         corner: Int,
         color: BackpackColor
     ) {
         if (corner !in 0..3) return
 
         val current = synchronized(lock) {
-            cubesByFactory.values
-                .firstOrNull { it.objectId == objectId }
+            cubesByFactory[factoryId]
                 ?.ledColors
                 ?.toMutableList()
         } ?: MutableList(4) { BackpackColor.OFF }
@@ -440,16 +471,18 @@ internal class CubeManager(
         current[corner] = color
 
         setLights(
-            objectId = objectId,
+            factoryId = factoryId,
             colors = current
         )
     }
 
     fun startChaser(
-        objectId: Long,
+        factoryId: Long,
         color: BackpackColor,
         rotationPeriodFrames: Int = 18
     ) {
+        val objectId = activeObjectIdForFactory(factoryId) ?: return
+
         val selectPayload =
             cubeIdPayload(
                 objectId = objectId,
@@ -465,6 +498,7 @@ internal class CubeManager(
         )
 
         sendCubeTransaction(
+            factoryId = factoryId,
             objectId = objectId,
             selectPayload = selectPayload,
             states = states,
@@ -477,12 +511,12 @@ internal class CubeManager(
         )
     }
 
-    fun stopChaser(objectId: Long) {
-        setSolidColor(objectId, BackpackColor.OFF)
+    fun stopChaser(factoryId: Long) {
+        setSolidColor(factoryId, BackpackColor.OFF)
     }
 
     fun setAllSolidColor(color: BackpackColor) {
-        connectedObjectIds()
+        connectedFactoryIds()
             .forEach { setSolidColor(it, color) }
     }
 
@@ -490,15 +524,17 @@ internal class CubeManager(
         first: BackpackColor,
         second: BackpackColor
     ) {
-        connectedObjectIds()
+        connectedFactoryIds()
             .forEach { setPairPattern(it, first, second) }
     }
 
     private fun setLights(
-        objectId: Long,
+        factoryId: Long,
         colors: List<BackpackColor>
     ) {
         if (colors.size != 4) return
+
+        val objectId = activeObjectIdForFactory(factoryId) ?: return
 
         val selectPayload =
             cubeIdPayload(
@@ -510,6 +546,7 @@ internal class CubeManager(
             colors.map(::solidLightState)
 
         sendCubeTransaction(
+            factoryId = factoryId,
             objectId = objectId,
             selectPayload = selectPayload,
             states = states,
@@ -518,6 +555,7 @@ internal class CubeManager(
     }
 
     private fun sendCubeTransaction(
+        factoryId: Long,
         objectId: Long,
         selectPayload: ByteArray,
         states: List<ByteArray>,
@@ -540,7 +578,7 @@ internal class CubeManager(
             true
         )
 
-        updateByObjectId(objectId) {
+        updateByFactoryId(factoryId) {
             it.copy(
                 ledColors = logicalColors,
                 lastEvent = "LEDs mises à jour"
@@ -552,9 +590,7 @@ internal class CubeManager(
         factoryId: Long,
         enabled: Boolean
     ) {
-        val objectId = synchronized(lock) {
-            cubesByFactory[factoryId]?.objectId
-        } ?: return
+        val objectId = activeObjectIdForFactory(factoryId) ?: return
 
         val payload = ByteBuffer.allocate(5)
             .order(ByteOrder.LITTLE_ENDIAN)
@@ -564,7 +600,7 @@ internal class CubeManager(
 
         sendCommand(0x08, payload)
 
-        updateByObjectId(objectId) {
+        updateByFactoryId(factoryId) {
             it.copy(
                 accelStreaming = enabled,
                 lastEvent =
@@ -677,11 +713,30 @@ internal class CubeManager(
         }
     }
 
-    private fun connectedObjectIds(): List<Long> =
+    private fun connectedFactoryIds(): List<Long> =
         synchronized(lock) {
             cubesByFactory.values
-                .filter { it.connected }
-                .mapNotNull { it.objectId }
+                .filter { cube ->
+                    cube.connected &&
+                        cube.objectId != null &&
+                        activeFactoryByObjectId[cube.objectId] == cube.factoryId
+                }
+                .map { it.factoryId }
+        }
+
+    private fun activeObjectIdForFactory(factoryId: Long): Long? =
+        synchronized(lock) {
+            val cube = cubesByFactory[factoryId] ?: return@synchronized null
+            val objectId = cube.objectId ?: return@synchronized null
+
+            if (
+                cube.connected &&
+                activeFactoryByObjectId[objectId] == factoryId
+            ) {
+                objectId
+            } else {
+                null
+            }
         }
 
     private fun updateByObjectId(
@@ -689,19 +744,35 @@ internal class CubeManager(
         publishChanges: Boolean = true,
         transform: (CubeInfo) -> CubeInfo
     ) {
+        val factoryId = synchronized(lock) {
+            activeFactoryByObjectId[objectId]
+        } ?: return
+
+        // Toute télémétrie valide rafraîchit aussi la fraîcheur du cube.
+        lastSeenNanos[factoryId] = System.nanoTime()
+
+        updateByFactoryId(
+            factoryId = factoryId,
+            publishChanges = publishChanges,
+            transform = transform
+        )
+    }
+
+    private fun updateByFactoryId(
+        factoryId: Long,
+        publishChanges: Boolean = true,
+        transform: (CubeInfo) -> CubeInfo
+    ) {
         var changed = false
 
         synchronized(lock) {
-            val entry =
-                cubesByFactory.entries
-                    .firstOrNull { it.value.objectId == objectId }
+            val previous = cubesByFactory[factoryId]
 
-            if (entry != null) {
-                val previous = entry.value
+            if (previous != null) {
                 val next = transform(previous)
 
                 if (next != previous) {
-                    cubesByFactory[entry.key] = next
+                    cubesByFactory[factoryId] = next
                     changed = true
                 }
             }
