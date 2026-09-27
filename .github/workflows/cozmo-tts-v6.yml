@@ -1,0 +1,235 @@
+name: Cozmo Android 15 TTS V6
+
+on:
+  push:
+    branches:
+      - cozmo-android15-tts-v3
+    paths:
+      - '.github/workflows/cozmo-tts-v6.yml'
+      - 'cozmo-v3/CozmoTextToSpeech.java'
+      - 'cozmo-v3/cozmo-v6-test.jks.b64'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cozmo-tts-v6.yml'
+      - 'cozmo-v3/CozmoTextToSpeech.java'
+      - 'cozmo-v3/cozmo-v6-test.jks.b64'
+  workflow_dispatch:
+
+env:
+  XAPK_URL: https://d.apkpure.net/b/XAPK/com.digitaldreamlabs.cozmo2?version=latest
+  XAPK_SIZE: 442556759
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip zip curl jq openjdk-17-jdk-headless
+          APKTOOL_URL="$(curl -fsSL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | jq -r '.assets[] | select(.name | test("^apktool_.*\\.jar$")) | .browser_download_url' | head -n 1)"
+          test -n "$APKTOOL_URL"
+          curl -fL "$APKTOOL_URL" -o apktool.jar
+          java -jar apktool.jar --version
+
+      - name: Download original Cozmo 3.6.6
+        run: |
+          set -euxo pipefail
+          mkdir -p work/xapk
+          curl -fL --retry 5 --retry-delay 3 "$XAPK_URL" -o work/Cozmo_3.6.6.xapk
+          test "$(stat -c %s work/Cozmo_3.6.6.xapk)" -eq "$XAPK_SIZE"
+          unzip -q work/Cozmo_3.6.6.xapk -d work/xapk
+          APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          cp "$APK" work/Cozmo_3.6.6_original.apk
+          unzip -p "$APK" lib/arm64-v8a/libcozmoEngine.so | sha256sum | tee work/original_engine.sha256
+          unzip -p "$APK" lib/arm64-v8a/libacattsandroid.so | sha256sum | tee work/original_acapela.sha256
+
+      - name: Decode original APK with smali
+        run: |
+          set -euxo pipefail
+          java -jar apktool.jar d -f work/Cozmo_3.6.6_original.apk -o work/decompiled
+          find work/decompiled -type f -path '*/com/anki/cozmo/CozmoTextToSpeech*.smali' -print
+
+      - name: Compile Android TTS bridge
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          PLATFORM="$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          ANDROID_JAR="$PLATFORM/android.jar"
+          D8="$BUILD_TOOLS/d8"
+          AAPT2="$BUILD_TOOLS/aapt2"
+          test -f "$ANDROID_JAR"
+          test -x "$D8"
+          test -x "$AAPT2"
+
+          mkdir -p work/tts-src/com/anki/cozmo work/tts-classes work/tts-dex
+          cp cozmo-v3/CozmoTextToSpeech.java work/tts-src/com/anki/cozmo/
+
+          javac -source 8 -target 8             -classpath "$ANDROID_JAR"             -d work/tts-classes             work/tts-src/com/anki/cozmo/CozmoTextToSpeech.java
+
+          "$D8" --min-api 26 --lib "$ANDROID_JAR"             --output work/tts-dex             $(find work/tts-classes -type f -name '*.class' | sort)
+
+          cat > work/tts-manifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.anki.cozmo.ttsbridge">
+              <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+              <application android:label="CozmoTTSBridge" />
+          </manifest>
+          XML
+
+          "$AAPT2" link -I "$ANDROID_JAR"             --manifest work/tts-manifest.xml             -o work/tts-bridge.apk
+          zip -q -j work/tts-bridge.apk work/tts-dex/classes.dex
+
+          java -jar apktool.jar d -f work/tts-bridge.apk -o work/tts-decoded
+          find work/tts-decoded -type f -path '*/com/anki/cozmo/CozmoTextToSpeech*.smali' -print
+
+      - name: Replace Acapela Java bridge
+        run: |
+          set -euxo pipefail
+          find work/decompiled -type f -path '*/com/anki/cozmo/CozmoTextToSpeech*.smali' -delete
+
+          NEW_DIR="$(find work/tts-decoded -type d -path '*/com/anki/cozmo' | head -n 1)"
+          OLD_DIR="$(find work/decompiled -type d -path '*/com/anki/cozmo' | head -n 1)"
+          test -n "$NEW_DIR"
+          test -n "$OLD_DIR"
+
+          cp "$NEW_DIR"/CozmoTextToSpeech*.smali "$OLD_DIR"/
+
+          test "$(find work/decompiled -type f -name 'CozmoTextToSpeech.smali' | wc -l)" -eq 1
+          grep -R -q 'Landroid/speech/tts/TextToSpeech;' work/decompiled/smali* || true
+          grep -R -q 'CozmoTTS.Android' work/decompiled/smali*
+
+          echo 'Replacement classes:'
+          find work/decompiled -type f -path '*/com/anki/cozmo/CozmoTextToSpeech*.smali' -print
+
+      - name: Rebuild APK
+        run: |
+          set -euxo pipefail
+          java -jar apktool.jar b work/decompiled -o work/Cozmo_3.6.6_android15_tts_v6-unsigned.apk
+
+      - name: Zipalign and sign with persistent V6 test key
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+
+          "$ZIPALIGN" -f -p 4             work/Cozmo_3.6.6_android15_tts_v6-unsigned.apk             work/Cozmo_3.6.6_android15_tts_v6-aligned.apk
+
+          base64 -d cozmo-v3/cozmo-v6-test.jks.b64 > work/cozmo-v6-test.jks
+
+          "$APKSIGNER" sign             --ks work/cozmo-v6-test.jks             --ks-key-alias cozmo-v6             --ks-pass pass:cozmo-v6-test             --key-pass pass:cozmo-v6-test             --out work/Cozmo_3.6.6_android15_tts_v6.apk             work/Cozmo_3.6.6_android15_tts_v6-aligned.apk
+
+          "$APKSIGNER" verify --verbose --print-certs work/Cozmo_3.6.6_android15_tts_v6.apk
+          "$ZIPALIGN" -c -p 4 work/Cozmo_3.6.6_android15_tts_v6.apk
+
+      - name: Verify V6 is original engine plus Android TTS bridge
+        run: |
+          set -euxo pipefail
+          FINAL=work/Cozmo_3.6.6_android15_tts_v6.apk
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
+
+          "$AAPT" dump badging "$FINAL" | head -n 15
+          "$AAPT" dump badging "$FINAL" | grep -q "package: name='com.digitaldreamlabs.cozmo2' versionCode='11' versionName='3.6.6'"
+          "$AAPT" dump badging "$FINAL" | grep -q "targetSdkVersion:'35'"
+
+          unzip -p "$FINAL" lib/arm64-v8a/libcozmoEngine.so | sha256sum | tee work/final_engine.sha256
+          unzip -p "$FINAL" lib/arm64-v8a/libacattsandroid.so | sha256sum | tee work/final_acapela.sha256
+          diff work/original_engine.sha256 work/final_engine.sha256
+          diff work/original_acapela.sha256 work/final_acapela.sha256
+
+          unzip -p "$FINAL" classes.dex | strings | grep -q 'CozmoTTS.Android'
+          unzip -p "$FINAL" classes.dex | strings | grep -q 'android/speech/tts/TextToSpeech'
+
+          sha256sum "$FINAL" | tee work/SHA256SUMS.txt
+          stat -c '%n %s bytes' "$FINAL"
+
+      - name: Prepare V6 test package
+        run: |
+          set -euxo pipefail
+          mkdir -p work/artifact
+          cp work/Cozmo_3.6.6_android15_tts_v6.apk work/artifact/
+          cp work/SHA256SUMS.txt work/artifact/
+
+          cat > work/artifact/README_Cozmo_V6.txt <<'TXT'
+          Cozmo 3.6.6 - Android 15 TTS V6
+
+          V6 change de strategie:
+          - libcozmoEngine.so ORIGINAL, non patchee
+          - libacattsandroid.so ORIGINAL, mais plus utilisee par le pont TTS
+          - targetSdkVersion ORIGINAL = 35
+          - remplacement uniquement de com.anki.cozmo.CozmoTextToSpeech
+          - synthese via android.speech.tts.TextToSpeech
+          - conversion en PCM 16 bits mono 22050 Hz
+          - reutilisation du callback JNI ORIGINAL de Cozmo vers le moteur audio
+          - conservation du traitement audio Cozmo_Voice_Processing
+
+          Le son est synthétisé sans lecture sur le telephone puis injecte dans le
+          meme vecteur PCM natif que l'ancienne bibliotheque Acapela.
+
+          IMPORTANT:
+          La premiere installation V6 doit remplacer toute V2/V3/V4/V5 car les
+          signatures different. Le BAT sauvegarde l'OBB avant desinstallation et
+          le restaure ensuite.
+          Les futures V6.x utilisent la meme cle de test et pourront etre installees
+          par-dessus cette V6 sans perdre l'OBB.
+          TXT
+
+          cat > work/artifact/install_cozmo_v6.bat <<'BAT'
+          @echo off
+          setlocal
+          set PKG=com.digitaldreamlabs.cozmo2
+          set OBB=main.11.com.digitaldreamlabs.cozmo2.obb
+          set APK=Cozmo_3.6.6_android15_tts_v6.apk
+          set BACKUP=%TEMP%\cozmo_v6_obb
+          if not exist "%BACKUP%" mkdir "%BACKUP%"
+
+          echo === Cozmo 3.6.6 Android TTS V6 ===
+          adb devices
+          echo.
+          echo Sauvegarde de l'OBB present sur le telephone...
+          adb pull "/sdcard/Android/obb/%PKG%/%OBB%" "%BACKUP%\%OBB%"
+
+          echo.
+          echo Desinstallation de l'ancienne signature...
+          adb uninstall %PKG%
+
+          echo Installation V6...
+          adb install "%APK%"
+          if errorlevel 1 goto :error
+
+          echo.
+          echo Restauration OBB...
+          adb shell mkdir -p "/sdcard/Android/obb/%PKG%"
+          if exist "%BACKUP%\%OBB%" (
+            adb push "%BACKUP%\%OBB%" "/sdcard/Android/obb/%PKG%/%OBB%"
+          ) else (
+            echo ATTENTION: OBB non sauvegarde. Placez %OBB% a cote du BAT puis relancez la copie.
+            if exist "%OBB%" adb push "%OBB%" "/sdcard/Android/obb/%PKG%/%OBB%"
+          )
+
+          adb shell ls -l "/sdcard/Android/obb/%PKG%/"
+          echo.
+          echo Installation terminee. Lancer Cozmo et tester une seule phrase.
+          pause
+          exit /b 0
+
+          :error
+          echo ECHEC installation APK.
+          pause
+          exit /b 1
+          BAT
+
+      - name: Upload V6 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cozmo-3.6.6-Android15-TTS-V6
+          path: work/artifact/*
+          if-no-files-found: error
+          retention-days: 30
