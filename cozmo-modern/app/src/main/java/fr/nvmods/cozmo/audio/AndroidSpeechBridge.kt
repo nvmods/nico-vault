@@ -27,7 +27,12 @@ class AndroidSpeechBridge(context: Context) {
         }
     }
 
-    suspend fun synthesize(text: String, locale: Locale): ShortArray = withContext(Dispatchers.IO) {
+    suspend fun synthesize(
+        text: String,
+        locale: Locale,
+        pitch: Float = 1.25f,
+        rate: Float = 0.90f
+    ): ShortArray = withContext(Dispatchers.IO) {
         require(text.isNotBlank()) { "Texte vide" }
 
         val status = withTimeout(8_000) { init.await() }
@@ -41,8 +46,8 @@ class AndroidSpeechBridge(context: Context) {
             "Langue TTS non disponible: " + locale + " (" + languageResult + ")"
         }
 
-        engine.setSpeechRate(1.0f)
-        engine.setPitch(1.0f)
+        engine.setSpeechRate(rate.coerceIn(0.55f, 1.50f))
+        engine.setPitch(pitch.coerceIn(0.70f, 1.80f))
 
         val utteranceId = "cozmo-modern-" + UUID.randomUUID().toString()
         val collector = Collector()
@@ -64,7 +69,8 @@ class AndroidSpeechBridge(context: Context) {
             val decoded = decodePcm(raw, collector.encoding)
             val mono = toMono(decoded, collector.channels)
             val resampled = resample(mono, collector.sampleRate, TARGET_RATE)
-            addSilence(resampled, TARGET_RATE, 50)
+            val conditioned = conditionForRobotSpeaker(resampled)
+            addSilence(conditioned, TARGET_RATE, 50)
         } finally {
             temp.delete()
         }
@@ -137,6 +143,36 @@ class AndroidSpeechBridge(context: Context) {
             }
         }
         return out
+    }
+
+    private fun conditionForRobotSpeaker(input: ShortArray): ShortArray {
+        if (input.isEmpty()) return input
+
+        // Coupe le grave/DC qui passe mal dans le petit haut-parleur, puis
+        // normalise sans écrêter. Le but est la lisibilité, pas un effet
+        // robotique artificiel.
+        val filtered = FloatArray(input.size)
+        var previousInput = 0f
+        var previousOutput = 0f
+        var peak = 1f
+
+        for (i in input.indices) {
+            val x = input[i].toFloat()
+            val y = x - previousInput + 0.985f * previousOutput
+            previousInput = x
+            previousOutput = y
+            filtered[i] = y
+            peak = max(peak, kotlin.math.abs(y))
+        }
+
+        val gain = minOf(1.8f, 26000f / peak)
+
+        return ShortArray(filtered.size) { i ->
+            (filtered[i] * gain)
+                .roundToInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                .toShort()
+        }
     }
 
     private fun addSilence(input: ShortArray, sampleRate: Int, silenceMs: Int): ShortArray {
