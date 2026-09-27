@@ -55,6 +55,30 @@ jobs:
           echo '=== calls to strerror/error ==='
           aarch64-linux-gnu-objdump -d "$SO" | grep -B6 -A6 -E 'bl[[:space:]]+(447c0|44154)' | head -n 300 || true
 
+      - name: Trace Cozmo TTS boundary
+        run: |
+          set -euxo pipefail
+          APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          mkdir -p work/tts
+          unzip -q "$APK" 'lib/arm64-v8a/libil2cpp.so' -d work/tts || true
+          unzip -q "$APK" 'assets/bin/Data/Managed/Metadata/global-metadata.dat' -d work/tts || true
+          echo '=== APK entries related to speech/voice/acapela ==='
+          unzip -l "$APK" | grep -Ei 'acap|speech|voice|tts|text.?to.?speech' | head -n 300 || true
+          echo '=== Java/Dex strings related to TTS ==='
+          strings -a "$APK" | grep -Ei 'Acapela|TextToSpeech|TTS|Speech|Voice' | head -n 300 || true
+          echo '=== libcozmoEngine TTS strings ==='
+          strings -a work/apk/lib/arm64-v8a/libcozmoEngine.so | grep -Ei 'Acapela|TextToSpeech|TTS|Speech|Voice|SayText|Speak|AudioChunk' | head -n 600 || true
+          echo '=== libil2cpp TTS strings ==='
+          if [ -f work/tts/lib/arm64-v8a/libil2cpp.so ]; then
+            strings -a work/tts/lib/arm64-v8a/libil2cpp.so | grep -Ei 'Acapela|TextToSpeech|TTS|Speech|Voice|SayText|Speak|AudioChunk' | head -n 600 || true
+          fi
+          echo '=== global-metadata TTS strings ==='
+          if [ -f work/tts/assets/bin/Data/Managed/Metadata/global-metadata.dat ]; then
+            strings -a work/tts/assets/bin/Data/Managed/Metadata/global-metadata.dat | grep -Ei 'Acapela|TextToSpeech|TTS|Speech|Voice|SayText|Speak|AudioChunk' | head -n 1000 || true
+          fi
+          echo '=== Acapela exported/dynamic symbols ==='
+          aarch64-linux-gnu-readelf -Ws work/apk/lib/arm64-v8a/libacattsandroid.so | grep -Ei 'FUNC|acap|tts|speech|voice|synth|audio' | head -n 1000 || true
+
       - name: Inspect Unity OBB downloader path with JADX
         run: |
           set -euxo pipefail
