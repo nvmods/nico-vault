@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -50,6 +51,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import fr.nvmods.cozmo.personality.PersonalityLogEntry
+import fr.nvmods.cozmo.personality.PersonalityMode
+import fr.nvmods.cozmo.personality.PersonalityState
 import fr.nvmods.cozmo.protocol.BackpackColor
 import fr.nvmods.cozmo.protocol.ConnectionState
 import fr.nvmods.cozmo.protocol.CozmoConnection
@@ -60,6 +64,8 @@ import fr.nvmods.cozmo.protocol.CubeInfo
 fun CozmoApp(vm: CozmoViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     val speechStatus by vm.speechStatus.collectAsState()
+    val personalityState by vm.personalityState.collectAsState()
+    val personalityLog by vm.personalityLog.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
 
     MaterialTheme(colorScheme = lightColorScheme()) {
@@ -87,7 +93,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
                 }
 
                 TabRow(selectedTabIndex = tab) {
-                    listOf("Pilotage", "Caméra", "Voix & cubes").forEachIndexed { index, label ->
+                    listOf("Pilotage", "Caméra", "Voix & cubes", "Perso").forEachIndexed { index, label ->
                         Tab(
                             selected = tab == index,
                             onClick = { tab = index },
@@ -99,7 +105,8 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
                 when (tab) {
                     0 -> PilotageTab(state, vm)
                     1 -> CameraTab(state, vm)
-                    else -> VoiceCubeTab(state, speechStatus, vm)
+                    2 -> VoiceCubeTab(state, speechStatus, vm)
+                    else -> PersonalityTab(personalityState, personalityLog, vm)
                 }
             }
         }
@@ -418,6 +425,167 @@ private fun VoiceCubeTab(
         Text(
             "Les prochaines briques lourdes seront visages/animations et comportements. La couche réseau est maintenant séparée et acquittée.",
             style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun PersonalityTab(
+    state: PersonalityState,
+    log: List<PersonalityLogEntry>,
+    vm: CozmoViewModel
+) {
+    ScrollColumn {
+        ControlCard("Moteur de personnalité — simulation") {
+            ToggleRow(
+                "Activer le moteur",
+                state.enabled,
+                vm::personalityEnabled
+            )
+
+            Text(
+                "Cette V1 utilise un robot simulé : les décisions sont calculées et journalisées, mais aucun mouvement autonome n'est envoyé à Cozmo.",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Text("Mode", fontWeight = FontWeight.Medium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                PersonalityMode.entries.forEach { mode ->
+                    FilledTonalButton(
+                        onClick = { vm.personalityMode(mode) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            if (state.mode == mode) "✓ " + mode.name
+                            else mode.name
+                        )
+                    }
+                }
+            }
+        }
+
+        ControlCard("État interne") {
+            PersonalityMeter("Bonheur", state.happiness)
+            PersonalityMeter("Curiosité", state.curiosity)
+            PersonalityMeter("Énergie", state.energy)
+            PersonalityMeter("Frustration", state.frustration)
+            PersonalityMeter("Confiance", state.confidence)
+
+            Text("Dernier stimulus : " + state.lastStimulus)
+            Text("Dernière décision : " + state.lastDecision)
+            Text(
+                "Interactions : " + state.interactions +
+                    "  •  ticks : " + state.idleTicks,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        ControlCard("Injecter une perception") {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = { vm.personalityFace("Nico") },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Visage")
+                }
+                FilledTonalButton(
+                    onClick = { vm.personalityCube(1) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cube")
+                }
+                FilledTonalButton(
+                    onClick = vm::personalityCubeLost,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cube perdu")
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = vm::personalityPickedUp,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Soulevé")
+                }
+                FilledTonalButton(
+                    onClick = vm::personalityPutDown,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Reposé")
+                }
+                FilledTonalButton(
+                    onClick = vm::personalityTouched,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Touché")
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = vm::personalityInteract,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Interaction")
+                }
+                FilledTonalButton(
+                    onClick = vm::personalityBatteryLow,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Batterie faible")
+                }
+            }
+        }
+
+        ControlCard("Journal des décisions") {
+            if (log.isEmpty()) {
+                Text("Aucune décision pour le moment.")
+            } else {
+                log.take(12).forEach { entry ->
+                    Text(
+                        entry.event + " → " + entry.decision,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (entry.actions.isNotEmpty()) {
+                        Text(
+                            entry.actions.joinToString(" • ") { action ->
+                                action::class.simpleName ?: action.toString()
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PersonalityMeter(
+    label: String,
+    value: Float
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(label + " : " + (value * 100).toInt() + " %")
+        LinearProgressIndicator(
+            progress = { value.coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
