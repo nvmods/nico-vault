@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
@@ -142,7 +141,7 @@ private fun CubeDetailCard(
             )
 
             Text(
-                "BLE=" + if (cube.connected) "connecté" else "déconnecté" +
+                "BLE=" + (if (cube.connected) "connecté" else "déconnecté") +
                     " • essais=" + cube.connectAttempts +
                     " • batterie=" + (cube.batteryLevel?.toString() ?: "—") +
                     " • paquets manqués=" + (cube.missedPackets?.toString() ?: "—"),
@@ -278,7 +277,7 @@ private fun CubeDetailCard(
             Text(
                 "Face haute : " + cube.upAxis.label +
                     " • mouvement : " +
-                    if (cube.moving) "oui" else "non" +
+                    (if (cube.moving) "oui" else "non") +
                     " • taps : " + cube.tapCount +
                     " • intensité : " +
                     (cube.tapIntensity?.toString() ?: "—"),
