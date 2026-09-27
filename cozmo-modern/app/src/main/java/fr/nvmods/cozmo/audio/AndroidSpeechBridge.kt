@@ -16,6 +16,13 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+data class SynthesizedSpeech(
+    val samples: ShortArray,
+    val sourceRate: Int,
+    val sourceEncoding: Int,
+    val sourceChannels: Int
+)
+
 class AndroidSpeechBridge(context: Context) {
     private val appContext = context.applicationContext
     private val init = CompletableDeferred<Int>()
@@ -32,7 +39,7 @@ class AndroidSpeechBridge(context: Context) {
         locale: Locale,
         pitch: Float = 1.25f,
         rate: Float = 0.90f
-    ): ShortArray = withContext(Dispatchers.IO) {
+    ): SynthesizedSpeech = withContext(Dispatchers.IO) {
         require(text.isNotBlank()) { "Texte vide" }
 
         val status = withTimeout(8_000) { init.await() }
@@ -74,7 +81,12 @@ class AndroidSpeechBridge(context: Context) {
             // Cozmo, on conserve le signal TTS aussi neutre que possible.
             // La compression spécifique au robot est faite ensuite dans le
             // transport audio.
-            addSilence(resampled, TARGET_RATE, 50)
+            SynthesizedSpeech(
+                samples = addSilence(resampled, TARGET_RATE, 50),
+                sourceRate = collector.sampleRate,
+                sourceEncoding = collector.encoding,
+                sourceChannels = collector.channels
+            )
         } finally {
             temp.delete()
         }
