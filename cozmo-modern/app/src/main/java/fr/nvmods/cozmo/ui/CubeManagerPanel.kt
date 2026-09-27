@@ -37,7 +37,7 @@ internal fun CubeManagerPanel(
             )
 
             ToggleLine(
-                label = "Recherche / connexion automatique",
+                label = "Connexion automatique des cubes",
                 checked = state.cubeDiscovery,
                 onChanged = vm::discoverCubes
             )
