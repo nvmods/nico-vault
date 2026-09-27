@@ -25,16 +25,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 
-data class CubeInfo(
-    val factoryId: Long,
-    val objectId: Long? = null,
-    val objectType: Int = -1,
-    val rssi: Int? = null,
-    val connected: Boolean = false,
-    val batteryLevel: Int? = null,
-    val lightColor: BackpackColor = BackpackColor.OFF
-)
-
 data class CozmoState(
     val connection: ConnectionState = ConnectionState.DISCONNECTED,
     val batteryVoltage: Float? = null,
@@ -78,8 +68,6 @@ class CozmoConnection {
 
     private val sendMutex = Mutex()
     private val cameraAssembler = CozmoCameraAssembler()
-    private val cubes = linkedMapOf<Long, CubeInfo>()
-    private val connectingCubeFactories = mutableSetOf<Long>()
     private val recentRobotSeq = LinkedHashSet<Int>()
 
     private var socket: DatagramSocket? = null
@@ -89,7 +77,24 @@ class CozmoConnection {
     private var reliableTransport: ReliableCommandTransport? = null
 
     private var backpackJob: Job? = null
-    private val cubeLightJobs = mutableMapOf<Long, Job>()
+
+    private val cubeManager by lazy {
+        CubeManager(
+            scope = scope,
+            sendCommand = { id, payload ->
+                sendCommand(id, payload)
+            },
+            sendSequential = { commands, waitUntilAcknowledged ->
+                sendSequential(
+                    commands = commands,
+                    waitUntilAcknowledged = waitUntilAcknowledged
+                )
+            },
+            onChanged = { cubes ->
+                _state.value = _state.value.copy(cubes = cubes)
+            }
+        )
+    }
 
     private var lastRobotSeq = CozmoProtocol.OOB_SEQ
     private var pingCounter = 0
@@ -144,8 +149,7 @@ class CozmoConnection {
         backpackJob?.cancel()
         backpackJob = null
 
-        cubeLightJobs.values.forEach { it.cancel() }
-        cubeLightJobs.clear()
+        cubeManager.reset()
 
         receiveJob?.cancel()
         pingJob?.cancel()
@@ -162,8 +166,6 @@ class CozmoConnection {
         lastRobotSeq = CozmoProtocol.OOB_SEQ
         pingCounter = 0
         recentRobotSeq.clear()
-        connectingCubeFactories.clear()
-        cubes.clear()
 
         _state.value = CozmoState(connection = ConnectionState.DISCONNECTED)
     }
@@ -226,10 +228,7 @@ class CozmoConnection {
 
     fun setAccessoryDiscovery(enabled: Boolean) {
         _state.value = _state.value.copy(cubeDiscovery = enabled)
-        sendCommand(
-            0x0a,
-            byteArrayOf((if (enabled) 1 else 0).toByte())
-        )
+        cubeManager.setDiscovery(enabled)
     }
 
     fun setRobotVolume(percent: Float) {
@@ -275,56 +274,68 @@ class CozmoConnection {
         }
     }
 
-    fun setCubeColor(objectId: Long, color: BackpackColor) {
-        cubeLightJobs[objectId]?.cancel()
-
-        cubeLightJobs[objectId] = scope.launch {
-            delay(20)
-
-            val selectCube = ByteBuffer.allocate(5)
-                .order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(objectId.toInt())
-                .put(0.toByte())
-                .array()
-
-            val light = lightState(cubeColorValue(color))
-            val lights = ByteBuffer.allocate(40)
-                .order(ByteOrder.LITTLE_ENDIAN)
-                .apply {
-                    repeat(4) { put(light) }
-                }
-                .array()
-
-            // Le firmware applique CubeId pour la trame suivante.
-            // On garde donc les deux commandes adjacentes mais dans DEUX
-            // trames ENGINE distinctes, comme l'exemple PyCozmo validé.
-            sendSequential(
-                commands = listOf(
-                    OutboundCommand(0x10, selectCube),
-                    OutboundCommand(0x04, lights)
-                ),
-                waitUntilAcknowledged = true
-            )
-
-            val entry = cubes.entries.firstOrNull {
-                it.value.objectId == objectId
-            }
-
-            if (entry != null) {
-                cubes[entry.key] = entry.value.copy(lightColor = color)
-                publishCubes()
-            }
-        }
+    fun setCubeColor(
+        objectId: Long,
+        color: BackpackColor
+    ) {
+        cubeManager.setSolidColor(objectId, color)
     }
 
     fun setAllCubeColor(color: BackpackColor) {
-        cubes.values
-            .mapNotNull { cube ->
-                cube.objectId?.takeIf { cube.connected }
-            }
-            .forEach { objectId ->
-                setCubeColor(objectId, color)
-            }
+        cubeManager.setAllSolidColor(color)
+    }
+
+    fun setCubePairPattern(
+        objectId: Long,
+        first: BackpackColor,
+        second: BackpackColor
+    ) {
+        cubeManager.setPairPattern(
+            objectId = objectId,
+            first = first,
+            second = second
+        )
+    }
+
+    fun setAllCubePairPattern(
+        first: BackpackColor,
+        second: BackpackColor
+    ) {
+        cubeManager.setAllPairPattern(first, second)
+    }
+
+    fun setCubeCornerColor(
+        objectId: Long,
+        corner: Int,
+        color: BackpackColor
+    ) {
+        cubeManager.setCornerColor(
+            objectId = objectId,
+            corner = corner,
+            color = color
+        )
+    }
+
+    fun setCubeAccelStreaming(
+        objectId: Long,
+        enabled: Boolean
+    ) {
+        cubeManager.setAccelStreaming(objectId, enabled)
+    }
+
+    fun setAllCubeAccelStreaming(enabled: Boolean) {
+        cubeManager.setAllAccelStreaming(enabled)
+    }
+
+    fun startCubeChaser(
+        objectId: Long,
+        color: BackpackColor
+    ) {
+        cubeManager.startChaser(objectId, color)
+    }
+
+    fun stopCubeChaser(objectId: Long) {
+        cubeManager.stopChaser(objectId)
     }
 
     suspend fun playPcm22050(samples: ShortArray) {
@@ -382,19 +393,6 @@ class CozmoConnection {
             _state.value = _state.value.copy(audioStreaming = false)
         }
     }
-
-    private fun cubeColorValue(color: BackpackColor): Int =
-        when (color) {
-            BackpackColor.WHITE -> {
-                // Les cubes ne rendent pas bien 0x7fff (RGB à fond) :
-                // le bleu s'effondre et le résultat tire rouge/jaune.
-                // On réduit le courant total et on renforce le bleu.
-                // R=8, G=8, B=16 sur 5 bits.
-                0x2110
-            }
-
-            else -> color.encoded
-        }
 
     private fun lightState(color: Int): ByteArray {
         return ByteBuffer.allocate(10)
@@ -610,9 +608,17 @@ class CozmoConnection {
 
             0xf0 -> parseRobotState(payload)
             0xf2 -> parseImageChunk(payload)
-            0xf3 -> parseObjectAvailable(payload)
-            0xd0 -> parseObjectConnection(payload)
-            0xce -> parseObjectPower(payload)
+
+            // Cubes / objets BLE.
+            0xf3 -> cubeManager.onObjectAvailable(payload)
+            0xd0 -> cubeManager.onObjectConnectionState(payload)
+            0xce -> cubeManager.onObjectPowerLevel(payload)
+            0xf5 -> cubeManager.onObjectAccel(payload)
+            0xb4 -> cubeManager.onObjectMoved(payload)
+            0xb5 -> cubeManager.onObjectStoppedMoving(payload)
+            0xb6 -> cubeManager.onObjectTapped(payload)
+            0xb9 -> cubeManager.onObjectTapFiltered(payload)
+            0xd7 -> cubeManager.onObjectUpAxisChanged(payload)
         }
     }
 
@@ -640,110 +646,6 @@ class CozmoConnection {
         _state.value = _state.value.copy(
             cameraBitmap = bitmap,
             cameraFrames = _state.value.cameraFrames + 1
-        )
-    }
-
-    private fun parseObjectAvailable(payload: ByteArray) {
-        if (payload.size < 9) return
-
-        val b = ByteBuffer.wrap(payload)
-            .order(ByteOrder.LITTLE_ENDIAN)
-
-        val factoryId =
-            b.int.toLong() and 0xffffffffL
-
-        val objectType = b.int
-        val rssi = b.get().toInt()
-
-        val previous = cubes[factoryId]
-
-        cubes[factoryId] =
-            (previous ?: CubeInfo(factoryId = factoryId)).copy(
-                objectType = objectType,
-                rssi = rssi
-            )
-
-        publishCubes()
-
-        if (
-            _state.value.cubeDiscovery &&
-            previous?.connected != true &&
-            connectingCubeFactories.add(factoryId)
-        ) {
-            // ObjectAvailable peut être publié plusieurs fois avant que
-            // ObjectConnectionState arrive. Une seule tentative à la fois :
-            // sinon on inonde le lien radio des cubes avec ObjectConnect.
-            val connectPayload =
-                ByteBuffer.allocate(5)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .putInt(factoryId.toInt())
-                    .put(1)
-                    .array()
-
-            sendCommand(
-                0x05,
-                connectPayload
-            )
-        }
-    }
-
-    private fun parseObjectConnection(payload: ByteArray) {
-        if (payload.size < 13) return
-
-        val b = ByteBuffer.wrap(payload)
-            .order(ByteOrder.LITTLE_ENDIAN)
-
-        val objectId =
-            b.int.toLong() and 0xffffffffL
-
-        val factoryId =
-            b.int.toLong() and 0xffffffffL
-
-        val objectType = b.int
-        val connected = b.get().toInt() != 0
-
-        val previous =
-            cubes[factoryId] ?: CubeInfo(factoryId)
-
-        connectingCubeFactories.remove(factoryId)
-
-        cubes[factoryId] = previous.copy(
-            objectId = objectId,
-            objectType = objectType,
-            connected = connected
-        )
-
-        publishCubes()
-    }
-
-    private fun parseObjectPower(payload: ByteArray) {
-        if (payload.size < 9) return
-
-        val b = ByteBuffer.wrap(payload)
-            .order(ByteOrder.LITTLE_ENDIAN)
-
-        val objectId =
-            b.int.toLong() and 0xffffffffL
-
-        b.int
-        val batteryLevel = b.get().toInt() and 0xff
-
-        val entry =
-            cubes.entries.firstOrNull {
-                it.value.objectId == objectId
-            } ?: return
-
-        cubes[entry.key] =
-            entry.value.copy(
-                batteryLevel = batteryLevel
-            )
-
-        publishCubes()
-    }
-
-    private fun publishCubes() {
-        _state.value = _state.value.copy(
-            cubes = cubes.values.toList()
         )
     }
 
