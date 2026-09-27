@@ -90,6 +90,10 @@ jobs:
           work/jadx/bin/jadx -d work/jadx-out "$APK" >/dev/null
           echo '=== CozmoActivity downloader references ==='
           grep -RIn -E 'UnityDownloader|OBB|obb|Download|download' work/jadx-out/sources/com/anki/cozmo work/jadx-out/sources/com/unity3d/plugin/downloader | head -n 400 || true
+          echo '=== CozmoTextToSpeech source ==='
+          sed -n '1,520p' work/jadx-out/sources/com/anki/cozmo/CozmoTextToSpeech.java || true
+          echo '=== references to CozmoTextToSpeech ==='
+          grep -RIn -E 'CozmoTextToSpeech|TextToSpeech' work/jadx-out/sources/com/anki/cozmo | head -n 300 || true
           echo '=== CozmoActivity source ==='
           sed -n '1,320p' work/jadx-out/sources/com/anki/cozmo/CozmoActivity.java || true
           echo '=== HackUnityPlayerActivity source ==='
