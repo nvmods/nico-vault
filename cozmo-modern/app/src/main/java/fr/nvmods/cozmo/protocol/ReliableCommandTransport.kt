@@ -59,6 +59,27 @@ internal class ReliableCommandTransport(
                 var retryCountChanged = false
 
                 val packetsToSend = mutex.withLock {
+                    val now = System.nanoTime()
+
+                    // PyCozmo appelle _resend_messages() AVANT
+                    // _collect_messages(). Le snapshot de retransmission doit
+                    // donc contenir uniquement les paquets déjà en attente,
+                    // jamais ceux que l'on va attribuer dans ce même cycle.
+                    val previouslyUnacked = window.entries()
+                    val resend =
+                        if (
+                            previouslyUnacked.isNotEmpty() &&
+                            lastAckTimeNanos != 0L &&
+                            now - lastAckTimeNanos >= ACK_TIMEOUT_NS
+                        ) {
+                            lastAckTimeNanos = now
+                            retries += previouslyUnacked.size
+                            retryCountChanged = true
+                            previouslyUnacked
+                        } else {
+                            emptyList()
+                        }
+
                     drainQueueIntoCarry()
 
                     val newPackets = mutableListOf<Pair<Int, OutboundCommand>>()
@@ -68,23 +89,6 @@ internal class ReliableCommandTransport(
                         val seq = window.put(command)
                         newPackets += seq to command
                     }
-
-                    val now = System.nanoTime()
-                    val unacked = window.entries()
-
-                    val resend =
-                        if (
-                            unacked.isNotEmpty() &&
-                            lastAckTimeNanos != 0L &&
-                            now - lastAckTimeNanos >= ACK_TIMEOUT_NS
-                        ) {
-                            lastAckTimeNanos = now
-                            retries += unacked.size
-                            retryCountChanged = true
-                            unacked
-                        } else {
-                            emptyList()
-                        }
 
                     resend + newPackets
                 }
