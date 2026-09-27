@@ -1,0 +1,67 @@
+name: Cozmo Android 15 TTS V3
+
+on:
+  push:
+    branches:
+      - cozmo-android15-tts-v3
+    paths:
+      - '.github/workflows/cozmo-tts-v3.yml'
+      - 'cozmo-v3/**'
+  workflow_dispatch:
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM64 binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils-aarch64-linux-gnu unzip zip curl
+
+      - name: Download Cozmo 3.6.6 XAPK
+        run: |
+          set -euxo pipefail
+          mkdir -p work
+          curl -fL --retry 5 --retry-delay 3 \
+            'https://d.apkpure.net/b/XAPK/com.digitaldreamlabs.cozmo2?version=latest' \
+            -o work/Cozmo_3.6.6.xapk
+          stat -c '%n %s bytes' work/Cozmo_3.6.6.xapk
+          sha256sum work/Cozmo_3.6.6.xapk
+          test "$(stat -c %s work/Cozmo_3.6.6.xapk)" -eq 442556759
+
+      - name: Extract APK and ARM64 libraries
+        run: |
+          set -euxo pipefail
+          mkdir -p work/xapk work/apk
+          unzip -q work/Cozmo_3.6.6.xapk -d work/xapk
+          APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          echo "APK=$APK"
+          unzip -q "$APK" 'lib/arm64-v8a/libacattsandroid.so' 'lib/arm64-v8a/libcozmoEngine.so' -d work/apk
+          sha256sum "$APK" work/apk/lib/arm64-v8a/libacattsandroid.so work/apk/lib/arm64-v8a/libcozmoEngine.so
+
+      - name: Inspect Acapela strerror and imports
+        run: |
+          set -euxo pipefail
+          SO=work/apk/lib/arm64-v8a/libacattsandroid.so
+          echo '=== dynamic symbols ==='
+          aarch64-linux-gnu-readelf -Ws "$SO" | grep -E 'strerror|dlsym|dlopen|android_log|malloc|free' || true
+          echo '=== relocations mentioning strerror ==='
+          aarch64-linux-gnu-readelf -r "$SO" | grep -i strerror || true
+          echo '=== dynamic section / NEEDED ==='
+          aarch64-linux-gnu-readelf -d "$SO" | grep -E 'NEEDED|SONAME' || true
+          echo '=== disassembly around 0x447c0 ==='
+          aarch64-linux-gnu-objdump -d --start-address=0x44780 --stop-address=0x44880 "$SO"
+          echo '=== callers containing branch to 0x447c0 (best effort) ==='
+          aarch64-linux-gnu-objdump -d "$SO" | grep -B4 -A4 -E 'bl[[:space:]]+447c0' | head -n 200 || true
+
+      - name: Dump manifest metadata
+        run: |
+          set -euxo pipefail
+          APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
+          echo "AAPT2=$AAPT"
+          "$AAPT" dump badging "$APK" | head -n 30 || true
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep -E -A2 -B2 'uses-sdk|targetSdkVersion|minSdkVersion|allowNativeHeapPointerTagging' || true
