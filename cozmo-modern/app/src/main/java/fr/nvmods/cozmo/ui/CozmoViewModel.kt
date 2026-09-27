@@ -74,12 +74,29 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
                 _speechStatus.value = "Synthèse…"
 
                 val locale = if (french) Locale.FRANCE else Locale.US
-                val pcm = speech.synthesize(text, locale, pitch, rate)
+                val synthesized =
+                    speech.synthesize(
+                        text = text,
+                        locale = locale,
+                        pitch = pitch,
+                        rate = rate
+                    )
 
-                _speechStatus.value = "Envoi vers Cozmo…"
-                connection.playPcm22050(pcm)
+                _speechStatus.value =
+                    "PCM Android " +
+                        synthesized.sourceRate +
+                        " Hz / " +
+                        synthesized.sourceChannels +
+                        " ch / enc=" +
+                        synthesized.sourceEncoding +
+                        " -> 22050 Hz"
 
-                _speechStatus.value = "Terminé"
+                connection.playPcm22050(synthesized.samples)
+
+                _speechStatus.value =
+                    "Terminé — source " +
+                        synthesized.sourceRate +
+                        " Hz -> 22050 Hz"
             } catch (t: Throwable) {
                 _speechStatus.value = "Erreur : " + t.message
             }
