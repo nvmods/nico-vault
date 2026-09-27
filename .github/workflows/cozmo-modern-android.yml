@@ -32,25 +32,29 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Decode persistent test signing key
+        run: |
+          base64 -d cozmo-modern/cozmo-modern-test.jks.b64 > cozmo-modern/cozmo-modern-test.jks
+
       - name: Unit tests
         working-directory: cozmo-modern
         run: gradle :app:testDebugUnitTest --stacktrace
 
-      - name: Build debug APK
+      - name: Build signed release APK
         working-directory: cozmo-modern
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleRelease --stacktrace
 
-      - name: Rename APK
+      - name: Prepare artifact
         run: |
-          cp cozmo-modern/app/build/outputs/apk/debug/app-debug.apk CozmoModern-v0-debug.apk
-          sha256sum CozmoModern-v0-debug.apk > CozmoModern-v0-debug.sha256
+          cp cozmo-modern/app/build/outputs/apk/release/app-release.apk CozmoModern-v0.5.apk
+          sha256sum CozmoModern-v0.5.apk > CozmoModern-v0.5.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CozmoModern-v0-debug
+          name: CozmoModern-v0.5
           path: |
-            CozmoModern-v0-debug.apk
-            CozmoModern-v0-debug.sha256
+            CozmoModern-v0.5.apk
+            CozmoModern-v0.5.sha256
           if-no-files-found: error
           retention-days: 30
