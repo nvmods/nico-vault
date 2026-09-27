@@ -28,6 +28,11 @@ class PersonalityEngineTest {
                 it == RobotAction.PlayAnimation("greeting")
             }
         )
+        assertTrue(
+            robot.history().contains(
+                RobotAction.PlaySound(PersonalitySoundCue.GREETING)
+            )
+        )
     }
 
     @Test
@@ -79,5 +84,10 @@ class PersonalityEngineTest {
 
         assertTrue(engine.state.value.energy < before)
         assertTrue(robot.history().contains(RobotAction.Stop))
+        assertTrue(
+            robot.history().contains(
+                RobotAction.PlaySound(PersonalitySoundCue.LOW_ENERGY)
+            )
+        )
     }
 }
