@@ -43,6 +43,35 @@ enum class PersonalityLight {
     WHITE
 }
 
+/**
+ * Intentions sonores de haut niveau.
+ *
+ * Elles ne dépendent pas d'un fichier audio précis : l'adaptateur audio
+ * choisira une variante dans le catalogue officiel, ce qui permet d'éviter
+ * que Cozmo répète toujours exactement le même bip/vocalise.
+ */
+enum class PersonalitySoundCue {
+    GREETING,
+    HAPPY_SHORT,
+    HAPPY_LONG,
+    CURIOUS,
+    BORED,
+    ANGRY,
+    SAD,
+    SURPRISED,
+    PICKED_UP,
+    PUT_DOWN,
+    EFFORT,
+    SELF_RIGHT,
+    CLIFF,
+    SLEEPY,
+    WAKE_UP,
+    PLAYFUL,
+    WIN,
+    LOSE,
+    LOW_ENERGY
+}
+
 sealed interface RobotAction {
     data object Stop : RobotAction
     data class Drive(
@@ -63,6 +92,7 @@ sealed interface RobotAction {
 
     data class Backpack(val light: PersonalityLight) : RobotAction
     data class PlayAnimation(val name: String) : RobotAction
+    data class PlaySound(val cue: PersonalitySoundCue) : RobotAction
     data class Speak(val text: String) : RobotAction
     data class Wait(val durationMs: Long) : RobotAction
 }
