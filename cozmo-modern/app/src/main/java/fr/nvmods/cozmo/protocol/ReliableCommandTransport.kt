@@ -8,7 +8,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlin.time.TimeSource
 
 internal data class OutboundCommand(
     val id: Int,
@@ -146,22 +145,6 @@ internal class ReliableCommandTransport(
         queue.close()
         windowChanged.close()
         pending.clear()
-    }
-
-    suspend fun awaitIdle(timeoutMs: Long = 5_000): Boolean {
-        val start = System.nanoTime()
-
-        while (true) {
-            val empty = pendingMutex.withLock {
-                pending.isEmpty() && queue.isEmpty
-            }
-            if (empty) return true
-
-            val elapsedMs = (System.nanoTime() - start) / 1_000_000L
-            if (elapsedMs >= timeoutMs) return false
-
-            delay(10)
-        }
     }
 
     private suspend fun waitForWindowSlot() {
