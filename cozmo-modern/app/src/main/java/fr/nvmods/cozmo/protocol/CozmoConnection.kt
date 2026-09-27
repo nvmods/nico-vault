@@ -68,7 +68,10 @@ class CozmoConnection {
 
     private val sendMutex = Mutex()
     private val cameraAssembler = CozmoCameraAssembler()
-    private val recentRobotSeq = LinkedHashSet<Int>()
+    private val receiveWindow = ReceiveSequenceWindow<CozmoProtocol.Packet>(
+        size = 62,
+        maxSeq = CozmoProtocol.MAX_SEQ
+    )
 
     private var socket: DatagramSocket? = null
     private var receiveJob: Job? = null
@@ -165,7 +168,7 @@ class CozmoConnection {
 
         lastRobotSeq = CozmoProtocol.OOB_SEQ
         pingCounter = 0
-        recentRobotSeq.clear()
+        receiveWindow.reset()
 
         _state.value = CozmoState(connection = ConnectionState.DISCONNECTED)
     }
@@ -529,35 +532,44 @@ class CozmoConnection {
 
             reliableTransport?.acknowledge(frame.ack)
 
-            var duplicate = false
-
+            // PyCozmo : le seq de trame sert d'ACK vers le robot, mais les
+            // EVENT sont hors fenêtre (OOB) et ne consomment PAS de numéro de
+            // séquence. Il ne faut donc jamais dédupliquer une trame entière
+            // simplement parce que frame.seq est identique à la précédente.
             if (frame.seq != CozmoProtocol.OOB_SEQ) {
                 lastRobotSeq = frame.seq
-
-                synchronized(recentRobotSeq) {
-                    duplicate = recentRobotSeq.contains(frame.seq)
-
-                    if (!duplicate) {
-                        recentRobotSeq += frame.seq
-
-                        if (recentRobotSeq.size > 128) {
-                            val first = recentRobotSeq.firstOrNull()
-                            if (first != null) {
-                                recentRobotSeq.remove(first)
-                            }
-                        }
-                    }
-                }
             }
-
-            if (duplicate) continue
 
             _state.value = _state.value.copy(
                 packetsReceived =
                     _state.value.packetsReceived + frame.packets.size
             )
 
-            frame.packets.forEach(::handlePacket)
+            if (
+                frame.type == CozmoProtocol.FrameType.ROBOT ||
+                frame.type == CozmoProtocol.FrameType.ENGINE
+            ) {
+                var packetSeq = frame.firstSeq
+
+                frame.packets.forEach { packet ->
+                    if (packet.type.id >= CozmoProtocol.PacketType.EVENT.id) {
+                        // EVENT / KEYFRAME / PING : livraison immédiate,
+                        // exactement comme Packet.is_oob() dans PyCozmo.
+                        handlePacket(packet)
+                    } else {
+                        receiveWindow.put(packetSeq, packet)
+                        packetSeq =
+                            (packetSeq + 1) % CozmoProtocol.MAX_SEQ
+                    }
+                }
+
+                while (true) {
+                    val packet = receiveWindow.get() ?: break
+                    handlePacket(packet)
+                }
+            } else {
+                frame.packets.forEach(::handlePacket)
+            }
         }
     }
 
