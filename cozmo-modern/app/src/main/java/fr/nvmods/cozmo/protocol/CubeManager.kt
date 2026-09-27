@@ -56,10 +56,7 @@ data class CubeInfo(
 internal class CubeManager(
     private val scope: CoroutineScope,
     private val sendCommand: (Int, ByteArray) -> Unit,
-    private val sendSequential: (
-        commands: List<OutboundCommand>,
-        waitUntilAcknowledged: Boolean
-    ) -> Unit,
+    private val sendBatch: (commands: List<OutboundCommand>) -> Unit,
     private val onChanged: (List<CubeInfo>) -> Unit
 ) {
     private val lock = Any()
@@ -570,12 +567,14 @@ internal class CubeManager(
             }
             .array()
 
-        sendSequential(
+        // PyCozmo place CubeId puis CubeLights dans la même file d'émission.
+        // Le collecteur transport les encode donc ensemble quand ils tiennent
+        // dans la même trame ENGINE. Ne pas insérer de barrière ACK entre eux.
+        sendBatch(
             listOf(
                 OutboundCommand(0x10, selectPayload),
                 OutboundCommand(0x04, lights)
-            ),
-            true
+            )
         )
 
         updateByFactoryId(factoryId) {
