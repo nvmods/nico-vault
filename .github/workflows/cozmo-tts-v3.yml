@@ -68,6 +68,10 @@ jobs:
           grep -RIn -E 'UnityDownloader|OBB|obb|Download|download' work/jadx-out/sources/com/anki/cozmo work/jadx-out/sources/com/unity3d/plugin/downloader | head -n 400 || true
           echo '=== CozmoActivity source ==='
           sed -n '1,320p' work/jadx-out/sources/com/anki/cozmo/CozmoActivity.java || true
+          echo '=== HackUnityPlayerActivity source ==='
+          sed -n '1,420p' work/jadx-out/sources/com/anki/cozmo/HackUnityPlayerActivity.java || true
+          echo '=== Google expansion impl l source ==='
+          sed -n '1,520p' work/jadx-out/sources/com/google/android/vending/expansion/downloader/impl/l.java || true
           echo '=== UnityDownloaderActivity source ==='
           sed -n '1,360p' work/jadx-out/sources/com/unity3d/plugin/downloader/UnityDownloaderActivity.java || true
           echo '=== UnityDownloaderNoUI source ==='
