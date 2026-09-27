@@ -55,6 +55,24 @@ jobs:
           echo '=== calls to strerror/error ==='
           aarch64-linux-gnu-objdump -d "$SO" | grep -B6 -A6 -E 'bl[[:space:]]+(447c0|44154)' | head -n 300 || true
 
+      - name: Inspect Unity OBB downloader path with JADX
+        run: |
+          set -euxo pipefail
+          sudo apt-get install -y openjdk-17-jre-headless
+          curl -fL --retry 5 https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip -o work/jadx.zip
+          unzip -q work/jadx.zip -d work/jadx
+          APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          mkdir -p work/jadx-out
+          work/jadx/bin/jadx -d work/jadx-out "$APK" >/dev/null
+          echo '=== CozmoActivity downloader references ==='
+          grep -RIn -E 'UnityDownloader|OBB|obb|Download|download' work/jadx-out/sources/com/anki/cozmo work/jadx-out/sources/com/unity3d/plugin/downloader | head -n 400 || true
+          echo '=== CozmoActivity source ==='
+          sed -n '1,320p' work/jadx-out/sources/com/anki/cozmo/CozmoActivity.java || true
+          echo '=== UnityDownloaderActivity source ==='
+          sed -n '1,360p' work/jadx-out/sources/com/unity3d/plugin/downloader/UnityDownloaderActivity.java || true
+          echo '=== UnityDownloaderNoUI source ==='
+          sed -n '1,420p' work/jadx-out/sources/com/unity3d/plugin/downloader/UnityDownloaderNoUI.java || true
+
       - name: Inspect Cozmo engine allocator crash path
         run: |
           set -euxo pipefail
