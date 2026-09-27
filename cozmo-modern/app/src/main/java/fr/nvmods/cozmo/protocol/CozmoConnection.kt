@@ -279,7 +279,7 @@ class CozmoConnection {
         cubeLightJobs[objectId]?.cancel()
 
         cubeLightJobs[objectId] = scope.launch {
-            delay(50)
+            delay(20)
 
             val selectCube = ByteBuffer.allocate(5)
                 .order(ByteOrder.LITTLE_ENDIAN)
@@ -287,7 +287,7 @@ class CozmoConnection {
                 .put(0.toByte())
                 .array()
 
-            val light = lightState(color.encoded)
+            val light = lightState(cubeColorValue(color))
             val lights = ByteBuffer.allocate(40)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .apply {
@@ -295,7 +295,10 @@ class CozmoConnection {
                 }
                 .array()
 
-            sendBatch(
+            // Le firmware applique CubeId pour la trame suivante.
+            // On garde donc les deux commandes adjacentes mais dans DEUX
+            // trames ENGINE distinctes, comme l'exemple PyCozmo validé.
+            sendSequential(
                 listOf(
                     OutboundCommand(0x10, selectCube),
                     OutboundCommand(0x04, lights)
@@ -379,6 +382,19 @@ class CozmoConnection {
         }
     }
 
+    private fun cubeColorValue(color: BackpackColor): Int =
+        when (color) {
+            BackpackColor.WHITE -> {
+                // Les cubes ne rendent pas bien 0x7fff (RGB à fond) :
+                // le bleu s'effondre et le résultat tire rouge/jaune.
+                // On réduit le courant total et on renforce le bleu.
+                // R=8, G=8, B=16 sur 5 bits.
+                0x2110
+            }
+
+            else -> color.encoded
+        }
+
     private fun lightState(color: Int): ByteArray {
         return ByteBuffer.allocate(10)
             .order(ByteOrder.LITTLE_ENDIAN)
@@ -429,6 +445,11 @@ class CozmoConnection {
     private fun sendBatch(commands: List<OutboundCommand>) {
         if (socket == null) return
         reliableTransport?.enqueueBatch(commands)
+    }
+
+    private fun sendSequential(commands: List<OutboundCommand>) {
+        if (socket == null) return
+        reliableTransport?.enqueueSequential(commands)
     }
 
     private suspend fun sendFrameNow(bytes: ByteArray) {
