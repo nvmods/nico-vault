@@ -65,8 +65,10 @@ internal class CubeManager(
     private val lock = Any()
     private val cubesByFactory = linkedMapOf<Long, CubeInfo>()
     private val lastSeenNanos = ConcurrentHashMap<Long, Long>()
+    private val lastAdvertPublishNanos = ConcurrentHashMap<Long, Long>()
     private val lastAccelPublishNanos = ConcurrentHashMap<Long, Long>()
     private val accelWantedFactories = mutableSetOf<Long>()
+    private var lastPublishedSnapshot: List<CubeInfo> = emptyList()
     private val disconnectJobs = mutableMapOf<Long, Job>()
 
     private var discoveryEnabled = false
@@ -89,6 +91,7 @@ internal class CubeManager(
         }
 
         lastSeenNanos.clear()
+        lastAdvertPublishNanos.clear()
         lastAccelPublishNanos.clear()
         publish()
     }
@@ -126,19 +129,35 @@ internal class CubeManager(
 
         if (objectType !in 1..3) return
 
-        lastSeenNanos[factoryId] = System.nanoTime()
+        val now = System.nanoTime()
+        lastSeenNanos[factoryId] = now
+
+        var publishNow = false
 
         synchronized(lock) {
             val previous = cubesByFactory[factoryId]
-
-            cubesByFactory[factoryId] =
+            val next =
                 (previous ?: CubeInfo(factoryId = factoryId)).copy(
                     objectType = objectType,
                     rssi = rssi
                 )
+
+            cubesByFactory[factoryId] = next
+
+            val lastUi = lastAdvertPublishNanos[factoryId] ?: 0L
+            publishNow =
+                previous == null ||
+                    previous.objectType != objectType ||
+                    (
+                        previous.rssi != rssi &&
+                            now - lastUi >= RSSI_UI_PERIOD_NS
+                    )
         }
 
-        publish()
+        if (publishNow) {
+            lastAdvertPublishNanos[factoryId] = now
+            publish()
+        }
     }
 
     fun onObjectConnectionState(payload: ByteArray) {
@@ -678,9 +697,13 @@ internal class CubeManager(
                     .firstOrNull { it.value.objectId == objectId }
 
             if (entry != null) {
-                cubesByFactory[entry.key] =
-                    transform(entry.value)
-                changed = true
+                val previous = entry.value
+                val next = transform(previous)
+
+                if (next != previous) {
+                    cubesByFactory[entry.key] = next
+                    changed = true
+                }
             }
         }
 
@@ -745,14 +768,22 @@ internal class CubeManager(
 
     private fun publish() {
         val snapshot = synchronized(lock) {
-            cubesByFactory.values
-                .sortedWith(
-                    compareBy<CubeInfo> {
-                        if (it.objectType in 1..3) it.objectType else 99
-                    }.thenBy { it.factoryId }
-                )
-                .toList()
-        }
+            val next =
+                cubesByFactory.values
+                    .sortedWith(
+                        compareBy<CubeInfo> {
+                            if (it.objectType in 1..3) it.objectType else 99
+                        }.thenBy { it.factoryId }
+                    )
+                    .toList()
+
+            if (next == lastPublishedSnapshot) {
+                null
+            } else {
+                lastPublishedSnapshot = next
+                next
+            }
+        } ?: return
 
         onChanged(snapshot)
     }
@@ -766,7 +797,13 @@ internal class CubeManager(
         private const val AFTER_SCAN_SETTLE_MS = 180L
         private const val RESCAN_DELAY_MS = 800L
         private const val STABLE_POLL_MS = 1_000L
-        private const val DISCONNECT_DEBOUNCE_MS = 600L
+        // Les transitions false liées au scan BLE peuvent durer plus de 600 ms.
+        // On garde donc l'état UI stable avant de déclarer une vraie coupure.
+        private const val DISCONNECT_DEBOUNCE_MS = 2_000L
+
+        // Le RSSI sert au diagnostic, pas au pilotage : 2 Hz suffit et évite
+        // de republier toute la liste à chaque publicité BLE reçue.
+        private const val RSSI_UI_PERIOD_NS = 500_000_000L
 
         // 10 Hz suffit largement pour l'affichage et évite de recomposer
         // toute l'UI à chaque paquet accéléromètre (~33 Hz par cube).
