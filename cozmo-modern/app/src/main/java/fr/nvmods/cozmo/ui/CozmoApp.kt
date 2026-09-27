@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -54,6 +55,7 @@ import fr.nvmods.cozmo.protocol.BackpackColor
 import fr.nvmods.cozmo.protocol.ConnectionState
 import fr.nvmods.cozmo.protocol.CozmoConnection
 import fr.nvmods.cozmo.protocol.CozmoState
+import fr.nvmods.cozmo.protocol.CubeInfo
 
 @Composable
 fun CozmoApp(vm: CozmoViewModel = viewModel()) {
@@ -75,12 +77,12 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.5",
+                        "Cozmo Modern 0.6",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Android moderne — sans libcozmoEngine / Acapela",
+                        "Transport fiable + caméra + cubes + TTS Android",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -107,7 +109,6 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
 
 @Composable
 private fun PilotageTab(state: CozmoState, vm: CozmoViewModel) {
-    var ir by remember { mutableStateOf(false) }
     var volume by remember { mutableFloatStateOf(0.65f) }
 
     ScrollColumn {
@@ -139,41 +140,86 @@ private fun PilotageTab(state: CozmoState, vm: CozmoViewModel) {
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
-                ControlButton(Icons.Default.ArrowUpward, "Avancer", vm::forward)
+                ControlButton(
+                    Icons.Default.ArrowUpward,
+                    "Avancer",
+                    vm::forward,
+                    Modifier.weight(1f)
+                )
             }
 
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ControlButton(Icons.Default.KeyboardArrowLeft, "Gauche", vm::left)
-                ControlButton(Icons.Default.Stop, "STOP", vm::stop)
-                ControlButton(Icons.Default.KeyboardArrowRight, "Droite", vm::right)
+                ControlButton(
+                    Icons.Default.KeyboardArrowLeft,
+                    "Gauche",
+                    vm::left,
+                    Modifier.weight(1f)
+                )
+                ControlButton(
+                    Icons.Default.Stop,
+                    "STOP",
+                    vm::stop,
+                    Modifier.weight(1f)
+                )
+                ControlButton(
+                    Icons.Default.KeyboardArrowRight,
+                    "Droite",
+                    vm::right,
+                    Modifier.weight(1f)
+                )
             }
 
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
-                ControlButton(Icons.Default.ArrowDownward, "Reculer", vm::backward)
+                ControlButton(
+                    Icons.Default.ArrowDownward,
+                    "Reculer",
+                    vm::backward,
+                    Modifier.weight(1f)
+                )
             }
         }
 
         ControlCard("Tête et lift") {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ControlButton(Icons.Default.ArrowUpward, "Tête +", vm::headUp)
-                ControlButton(Icons.Default.ArrowDownward, "Tête −", vm::headDown)
+                ControlButton(
+                    Icons.Default.ArrowUpward,
+                    "Tête +",
+                    vm::headUp,
+                    Modifier.weight(1f)
+                )
+                ControlButton(
+                    Icons.Default.ArrowDownward,
+                    "Tête −",
+                    vm::headDown,
+                    Modifier.weight(1f)
+                )
             }
 
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ControlButton(Icons.Default.ArrowUpward, "Lift +", vm::liftUp)
-                ControlButton(Icons.Default.ArrowDownward, "Lift −", vm::liftDown)
+                ControlButton(
+                    Icons.Default.ArrowUpward,
+                    "Lift +",
+                    vm::liftUp,
+                    Modifier.weight(1f)
+                )
+                ControlButton(
+                    Icons.Default.ArrowDownward,
+                    "Lift −",
+                    vm::liftDown,
+                    Modifier.weight(1f)
+                )
             }
 
             Button(
@@ -185,39 +231,27 @@ private fun PilotageTab(state: CozmoState, vm: CozmoViewModel) {
         }
 
         ControlCard("Éclairage") {
-            ToggleRow("LED infrarouge caméra", ir) {
-                ir = it
-                vm.headLight(it)
-            }
+            ToggleRow(
+                "LED infrarouge caméra",
+                state.headLightEnabled,
+                vm::headLight
+            )
+
+            Text(
+                "État IR conservé entre les onglets et réappliqué après activation caméra.",
+                style = MaterialTheme.typography.bodySmall
+            )
 
             Text("Backpack", fontWeight = FontWeight.Medium)
+            ColorButtons(
+                current = state.backpackColor,
+                onColor = vm::backpack
+            )
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                FilledTonalButton(onClick = { vm.backpack(BackpackColor.RED) }) {
-                    Text("Rouge")
-                }
-                FilledTonalButton(onClick = { vm.backpack(BackpackColor.GREEN) }) {
-                    Text("Vert")
-                }
-                FilledTonalButton(onClick = { vm.backpack(BackpackColor.BLUE) }) {
-                    Text("Bleu")
-                }
-            }
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                FilledTonalButton(onClick = { vm.backpack(BackpackColor.WHITE) }) {
-                    Text("Blanc")
-                }
-                FilledTonalButton(onClick = { vm.backpack(BackpackColor.OFF) }) {
-                    Text("Off")
-                }
-            }
+            Text(
+                "Les changements rapides sont coalescés avant envoi pour éviter de saturer la liaison.",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
 
         ControlCard("Volume robot") {
@@ -242,6 +276,12 @@ private fun CameraTab(state: CozmoState, vm: CozmoViewModel) {
                 vm::camera
             )
 
+            ToggleRow(
+                "LED IR",
+                state.headLightEnabled,
+                vm::headLight
+            )
+
             val bitmap = state.cameraBitmap
 
             if (bitmap != null) {
@@ -260,7 +300,7 @@ private fun CameraTab(state: CozmoState, vm: CozmoViewModel) {
             }
 
             Text(
-                "La LED de tête est infrarouge : dans une pièce sombre, compare IR OFF/ON directement avec ce flux.",
+                "L'état IR est commun aux écrans : plus de reset visuel lors d'un changement d'onglet.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
@@ -275,6 +315,8 @@ private fun VoiceCubeTab(
 ) {
     var text by remember { mutableStateOf("Bonjour, je suis Cozmo !") }
     var french by remember { mutableStateOf(true) }
+    var pitch by remember { mutableFloatStateOf(1.25f) }
+    var rate by remember { mutableFloatStateOf(0.90f) }
 
     ScrollColumn {
         ControlCard("Voix — expérimental") {
@@ -287,29 +329,63 @@ private fun VoiceCubeTab(
 
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilledTonalButton(onClick = { french = true }) {
+                FilledTonalButton(
+                    onClick = { french = true },
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(if (french) "✓ Français" else "Français")
                 }
 
-                FilledTonalButton(onClick = { french = false }) {
+                FilledTonalButton(
+                    onClick = { french = false },
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(if (!french) "✓ Anglais" else "Anglais")
                 }
             }
 
+            Text("Pitch : " + "%.2f".format(pitch))
+            Slider(
+                value = pitch,
+                onValueChange = { pitch = it },
+                valueRange = 0.70f..1.80f
+            )
+
+            Text("Vitesse : " + "%.2f".format(rate))
+            Slider(
+                value = rate,
+                onValueChange = { rate = it },
+                valueRange = 0.55f..1.50f
+            )
+
             Button(
-                onClick = { vm.speak(text, french) },
-                enabled = state.connection == ConnectionState.READY && !state.audioStreaming,
+                onClick = {
+                    vm.speak(
+                        text = text,
+                        french = french,
+                        pitch = pitch,
+                        rate = rate
+                    )
+                },
+                enabled = state.connection == ConnectionState.READY &&
+                    !state.audioStreaming,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (state.audioStreaming) "Lecture…" else "Faire parler Cozmo")
+                Text(
+                    if (state.audioStreaming) {
+                        "Lecture…"
+                    } else {
+                        "Faire parler Cozmo"
+                    }
+                )
             }
 
             Text("État : " + speechStatus)
 
             Text(
-                "Android synthétise le PCM puis l'envoie au haut-parleur de Cozmo en 22,05 kHz.",
+                "Le son est filtré/normalisé pour le petit haut-parleur. Les réglages pitch/vitesse permettent d'ajuster sans recompiler.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
@@ -324,25 +400,117 @@ private fun VoiceCubeTab(
             if (state.cubes.isEmpty()) {
                 Text("Aucun cube détecté pour le moment.")
             } else {
-                state.cubes.forEachIndexed { index, cube ->
-                    Text(
-                        "Cube " + (index + 1) + " — 0x" + cube.factoryId.toString(16),
-                        fontWeight = FontWeight.SemiBold
-                    )
+                Text("Couleur de tous les cubes", fontWeight = FontWeight.Medium)
+                ColorButtons(
+                    current = null,
+                    onColor = vm::allCubeColor
+                )
 
-                    Text(
-                        "type=" + cube.objectType +
-                            "  RSSI=" + (cube.rssi?.toString() ?: "—") +
-                            "  connecté=" + (if (cube.connected) "oui" else "non") +
-                            "  batterie=" + (cube.batteryLevel?.toString() ?: "—")
+                state.cubes.forEachIndexed { index, cube ->
+                    CubeCard(
+                        index = index,
+                        cube = cube,
+                        vm = vm
                     )
                 }
             }
         }
 
         Text(
-            "Les animations/visages seront ajoutés après validation caméra + audio : ils utilisent le même flux temps réel 30 FPS.",
+            "Les prochaines briques lourdes seront visages/animations et comportements. La couche réseau est maintenant séparée et acquittée.",
             style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun CubeCard(
+    index: Int,
+    cube: CubeInfo,
+    vm: CozmoViewModel
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Cube " + (index + 1) + " — 0x" + cube.factoryId.toString(16),
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                "type=" + cube.objectType +
+                    "  RSSI=" + (cube.rssi?.toString() ?: "—") +
+                    "  connecté=" + (if (cube.connected) "oui" else "non") +
+                    "  batterie=" + (cube.batteryLevel?.toString() ?: "—")
+            )
+
+            val objectId = cube.objectId
+
+            if (cube.connected && objectId != null) {
+                Text(
+                    "LEDs : " + cube.lightColor.name,
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                ColorButtons(
+                    current = cube.lightColor,
+                    onColor = { color ->
+                        vm.cubeColor(objectId, color)
+                    }
+                )
+            } else {
+                Text(
+                    "Attente de connexion au cube avant pilotage des LEDs.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorButtons(
+    current: BackpackColor?,
+    onColor: (BackpackColor) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        ColorButton("Rouge", BackpackColor.RED, current, onColor, Modifier.weight(1f))
+        ColorButton("Vert", BackpackColor.GREEN, current, onColor, Modifier.weight(1f))
+        ColorButton("Bleu", BackpackColor.BLUE, current, onColor, Modifier.weight(1f))
+    }
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        ColorButton("Blanc", BackpackColor.WHITE, current, onColor, Modifier.weight(1f))
+        ColorButton("Off", BackpackColor.OFF, current, onColor, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ColorButton(
+    label: String,
+    color: BackpackColor,
+    current: BackpackColor?,
+    onColor: (BackpackColor) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilledTonalButton(
+        onClick = { onColor(color) },
+        modifier = modifier
+    ) {
+        Text(
+            if (current == color) {
+                "✓ " + label
+            } else {
+                label
+            }
         )
     }
 }
@@ -368,14 +536,45 @@ private fun StatusCard(state: CozmoState) {
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("État : " + state.connection, fontWeight = FontWeight.SemiBold)
-            Text("Batterie : " + (state.batteryVoltage?.let { "%.2f V".format(it) } ?: "—"))
+            Text(
+                "État : " + state.connection,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                "Batterie : " +
+                    (state.batteryVoltage?.let {
+                        "%.2f V".format(it)
+                    } ?: "—")
+            )
+
             Text(
                 "Tête : " +
-                    (state.headAngleRad?.let { "%.1f°".format(CozmoConnection.radToDeg(it)) } ?: "—")
+                    (state.headAngleRad?.let {
+                        "%.1f°".format(
+                            CozmoConnection.radToDeg(it)
+                        )
+                    } ?: "—")
             )
-            Text("Lift : " + (state.liftHeightMm?.let { "%.1f mm".format(it) } ?: "—"))
-            Text("Paquets RX/TX : " + state.packetsReceived + " / " + state.packetsSent)
+
+            Text(
+                "Lift : " +
+                    (state.liftHeightMm?.let {
+                        "%.1f mm".format(it)
+                    } ?: "—")
+            )
+
+            Text(
+                "Paquets RX/TX : " +
+                    state.packetsReceived +
+                    " / " +
+                    state.packetsSent
+            )
+
+            Text(
+                "Retransmissions TX : " + state.txRetries,
+                style = MaterialTheme.typography.bodySmall
+            )
 
             if (state.lastError != null) {
                 Text(
@@ -397,7 +596,10 @@ private fun ControlCard(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(
+                title,
+                fontWeight = FontWeight.SemiBold
+            )
             content()
         }
     }
@@ -407,11 +609,18 @@ private fun ControlCard(
 private fun ControlButton(
     icon: ImageVector,
     label: String,
-    action: () -> Unit
+    action: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    FilledTonalButton(onClick = action) {
-        Icon(icon, contentDescription = null)
-        Text("  " + label)
+    FilledTonalButton(
+        onClick = action,
+        modifier = modifier
+    ) {
+        Icon(
+            icon,
+            contentDescription = null
+        )
+        Text(" " + label)
     }
 }
 
