@@ -20,20 +20,10 @@ enum class CubeUpAxis(val raw: Int, val label: String) {
     UNKNOWN(7, "?");
 
     companion object {
-        private const val CONNECT_TIMEOUT_MS = 2_500L
-        private const val BETWEEN_CONNECTS_MS = 220L
-        private const val AVAILABLE_MAX_AGE_NS = 8_000_000_000L
-
-        private const val SCAN_WINDOW_MS = 1_500L
-        private const val AFTER_SCAN_SETTLE_MS = 180L
-        private const val RESCAN_DELAY_MS = 800L
-        private const val STABLE_POLL_MS = 1_000L
-        private const val DISCONNECT_DEBOUNCE_MS = 600L
-
-        // 10 Hz suffit largement pour l'affichage et évite de recomposer toute
-        // l'UI à chaque paquet accéléromètre (~33 Hz par cube).
-        private const val ACCEL_UI_PERIOD_NS = 100_000_000L
-    }}
+        fun fromRaw(value: Int): CubeUpAxis =
+            entries.firstOrNull { it.raw == value } ?: UNKNOWN
+    }
+}
 
 data class CubeInfo(
     val factoryId: Long,
@@ -768,8 +758,18 @@ internal class CubeManager(
     }
 
     companion object {
-        private const val CONNECT_TIMEOUT_MS = 2_000L
-        private const val BETWEEN_CONNECTS_MS = 180L
-        private const val AVAILABLE_MAX_AGE_NS = 5_000_000_000L
+        private const val CONNECT_TIMEOUT_MS = 2_500L
+        private const val BETWEEN_CONNECTS_MS = 220L
+        private const val AVAILABLE_MAX_AGE_NS = 8_000_000_000L
+
+        private const val SCAN_WINDOW_MS = 1_500L
+        private const val AFTER_SCAN_SETTLE_MS = 180L
+        private const val RESCAN_DELAY_MS = 800L
+        private const val STABLE_POLL_MS = 1_000L
+        private const val DISCONNECT_DEBOUNCE_MS = 600L
+
+        // 10 Hz suffit largement pour l'affichage et évite de recomposer
+        // toute l'UI à chaque paquet accéléromètre (~33 Hz par cube).
+        private const val ACCEL_UI_PERIOD_NS = 100_000_000L
     }
 }
