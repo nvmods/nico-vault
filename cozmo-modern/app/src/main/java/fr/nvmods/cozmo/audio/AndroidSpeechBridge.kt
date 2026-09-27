@@ -69,8 +69,12 @@ class AndroidSpeechBridge(context: Context) {
             val decoded = decodePcm(raw, collector.encoding)
             val mono = toMono(decoded, collector.channels)
             val resampled = resample(mono, collector.sampleRate, TARGET_RATE)
-            val conditioned = conditionForRobotSpeaker(resampled)
-            addSilence(conditioned, TARGET_RATE, 50)
+
+            // Ne pas "embellir" le PCM ici : pour diagnostiquer la chaîne
+            // Cozmo, on conserve le signal TTS aussi neutre que possible.
+            // La compression spécifique au robot est faite ensuite dans le
+            // transport audio.
+            addSilence(resampled, TARGET_RATE, 50)
         } finally {
             temp.delete()
         }
@@ -143,36 +147,6 @@ class AndroidSpeechBridge(context: Context) {
             }
         }
         return out
-    }
-
-    private fun conditionForRobotSpeaker(input: ShortArray): ShortArray {
-        if (input.isEmpty()) return input
-
-        // Coupe le grave/DC qui passe mal dans le petit haut-parleur, puis
-        // normalise sans écrêter. Le but est la lisibilité, pas un effet
-        // robotique artificiel.
-        val filtered = FloatArray(input.size)
-        var previousInput = 0f
-        var previousOutput = 0f
-        var peak = 1f
-
-        for (i in input.indices) {
-            val x = input[i].toFloat()
-            val y = x - previousInput + 0.985f * previousOutput
-            previousInput = x
-            previousOutput = y
-            filtered[i] = y
-            peak = max(peak, kotlin.math.abs(y))
-        }
-
-        val gain = minOf(1.8f, 26000f / peak)
-
-        return ShortArray(filtered.size) { i ->
-            (filtered[i] * gain)
-                .roundToInt()
-                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                .toShort()
-        }
     }
 
     private fun addSilence(input: ShortArray, sampleRate: Int, silenceMs: Int): ShortArray {
