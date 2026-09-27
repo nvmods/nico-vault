@@ -1,4 +1,4 @@
-name: Cozmo Android 15 TTS V3
+name: Cozmo Android 15 TTS V4
 
 on:
   push:
@@ -118,10 +118,26 @@ jobs:
           sha256sum "$SO"
           aarch64-linux-gnu-objdump -d --start-address=0x447c0 --stop-address=0x44854 "$SO"
 
+      - name: Patch Cozmo engine corrupt-neighbour guard
+        run: |
+          set -euxo pipefail
+          ENG=work/decompiled/lib/arm64-v8a/libcozmoEngine.so
+          sha256sum "$ENG"
+          python3 cozmo-v3/patch_engine_v4.py "$ENG"
+          sha256sum "$ENG"
+          aarch64-linux-gnu-objdump -d --start-address=0x12d3f5c --stop-address=0x12d3f84 "$ENG"
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path("work/decompiled/lib/arm64-v8a/libcozmoEngine.so").read_bytes()
+          # executable PT_LOAD has VMA-file delta 0x1000 for this verified binary
+          print("V4 cave bytes:", b[0x1339908-0x1000:0x1339910-0x1000].hex())
+          assert b[0x1339908-0x1000:0x1339910-0x1000].hex() == "62f47e925069fe17"
+          PY
+
       - name: Rebuild APK
         run: |
           set -euxo pipefail
-          java -jar apktool.jar b work/decompiled -o work/Cozmo_3.6.6_android15_tts_v3-unsigned.apk
+          java -jar apktool.jar b work/decompiled -o work/Cozmo_3.6.6_android15_tts_v4-unsigned.apk
 
       - name: Zipalign and sign
         run: |
@@ -129,28 +145,28 @@ jobs:
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
-          "$ZIPALIGN" -f -p 4 work/Cozmo_3.6.6_android15_tts_v3-unsigned.apk work/Cozmo_3.6.6_android15_tts_v3-aligned.apk
+          "$ZIPALIGN" -f -p 4 work/Cozmo_3.6.6_android15_tts_v4-unsigned.apk work/Cozmo_3.6.6_android15_tts_v4-aligned.apk
           keytool -genkeypair -noprompt \
-            -keystore work/cozmo-v3-test.jks \
-            -storepass cozmo-v3-test \
-            -keypass cozmo-v3-test \
-            -alias cozmo-v3 \
+            -keystore work/cozmo-v4-test.jks \
+            -storepass cozmo-v4-test \
+            -keypass cozmo-v4-test \
+            -alias cozmo-v4 \
             -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Cozmo Android15 TTS V3,OU=Diagnostic,O=nvmods,C=FR"
+            -dname "CN=Cozmo Android15 TTS V4,OU=Diagnostic,O=nvmods,C=FR"
           "$APKSIGNER" sign \
-            --ks work/cozmo-v3-test.jks \
-            --ks-key-alias cozmo-v3 \
-            --ks-pass pass:cozmo-v3-test \
-            --key-pass pass:cozmo-v3-test \
-            --out work/Cozmo_3.6.6_android15_tts_v3.apk \
-            work/Cozmo_3.6.6_android15_tts_v3-aligned.apk
-          "$APKSIGNER" verify --verbose --print-certs work/Cozmo_3.6.6_android15_tts_v3.apk
-          "$ZIPALIGN" -c -p 4 work/Cozmo_3.6.6_android15_tts_v3.apk
+            --ks work/cozmo-v4-test.jks \
+            --ks-key-alias cozmo-v4 \
+            --ks-pass pass:cozmo-v4-test \
+            --key-pass pass:cozmo-v4-test \
+            --out work/Cozmo_3.6.6_android15_tts_v4.apk \
+            work/Cozmo_3.6.6_android15_tts_v4-aligned.apk
+          "$APKSIGNER" verify --verbose --print-certs work/Cozmo_3.6.6_android15_tts_v4.apk
+          "$ZIPALIGN" -c -p 4 work/Cozmo_3.6.6_android15_tts_v4.apk
 
       - name: Verify final APK
         run: |
           set -euxo pipefail
-          FINAL=work/Cozmo_3.6.6_android15_tts_v3.apk
+          FINAL=work/Cozmo_3.6.6_android15_tts_v4.apk
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
           "$AAPT" dump badging "$FINAL" | head -n 12
           "$AAPT" dump badging "$FINAL" | grep -q "targetSdkVersion:'29'"
@@ -164,32 +180,32 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p work/artifact
-          cp work/Cozmo_3.6.6_android15_tts_v3.apk work/artifact/
+          cp work/Cozmo_3.6.6_android15_tts_v4.apk work/artifact/
           cp work/SHA256SUMS.txt work/artifact/
-          cp cozmo-v3/README.md work/artifact/README_Cozmo_V3.txt
-          cat > work/artifact/install_cozmo_v3.bat <<'BAT'
+          cp cozmo-v3/README_V4.md work/artifact/README_Cozmo_V4.txt
+          cat > work/artifact/install_cozmo_v4.bat <<'BAT'
           @echo off
-          echo === Cozmo 3.6.6 Android 15 TTS V3 ===
+          echo === Cozmo 3.6.6 Android 15 TTS V4 ===
           adb devices
           echo.
           echo ATTENTION: la signature de test differe de l'APK officielle.
           echo L'OBB main.11.com.digitaldreamlabs.cozmo2.obb doit deja etre conserve.
           pause
           adb uninstall com.digitaldreamlabs.cozmo2
-          adb install "Cozmo_3.6.6_android15_tts_v3.apk"
+          adb install "Cozmo_3.6.6_android15_tts_v4.apk"
           echo.
-          echo Verification compat heap tagging:
-          adb shell am compat reset NATIVE_HEAP_POINTER_TAGGING com.digitaldreamlabs.cozmo2
+          echo Tentative de desactivation du heap pointer tagging:
+          adb shell am compat disable 135754954 com.digitaldreamlabs.cozmo2
           echo.
           echo Replacer ensuite l'OBB original dans:
           echo /sdcard/Android/obb/com.digitaldreamlabs.cozmo2/
           pause
           BAT
 
-      - name: Upload V3 APK
+      - name: Upload V4 APK
         uses: actions/upload-artifact@v4
         with:
-          name: Cozmo-3.6.6-Android15-TTS-V3
+          name: Cozmo-3.6.6-Android15-TTS-V4
           path: work/artifact/*
           if-no-files-found: error
           retention-days: 30
