@@ -1,67 +1,63 @@
 # Cozmo Modern
 
-Réécriture progressive de l'application mobile Cozmo pour Android récent.
+Réécriture de l'application mobile Cozmo pour Android actuel, sans dépendance d'exécution à l'ancien moteur natif.
 
-## Objectif V0
+## V0.5
 
-La V0 retire complètement de la boucle d'exécution :
+Cette version regroupe plusieurs fonctions dans un seul jalon pour éviter une succession de petites APK :
 
-- `libcozmoEngine.so`
-- Acapela TTS
-- l'ancien Unity Downloader / Google LVL
-- les APK/OBB historiques pour le cœur de communication
-
-Le premier jalon est volontairement réduit : établir une connexion directe avec le robot, initialiser son protocole et piloter les moteurs avec une application Android moderne.
+- connexion directe UDP au robot ;
+- handshake, Enable, SetOrigin et SyncTime ;
+- télémétrie batterie / tête / lift ;
+- chenilles, tête et lift ;
+- LED infrarouge de caméra ;
+- LEDs du backpack (rouge, vert, bleu, blanc, off) ;
+- volume robot ;
+- caméra 320×240 avec réassemblage des ImageChunk et décodage JPEG MiniGray ;
+- découverte et connexion automatique des cubes + RSSI / état / batterie ;
+- synthèse vocale Android -> PCM mono 22,05 kHz -> μ-law -> OutputAudio vers le haut-parleur du robot ;
+- UI Android moderne en trois onglets ;
+- signature de test persistante pour les prochaines V0.x.
 
 ## Architecture
 
 ```
 Android / Kotlin / Compose
         |
-        +-- cozmo.protocol
-        |      +-- UDP 172.31.1.1:5551
+        +-- protocole Cozmo UDP natif
+        |      +-- 172.31.1.1:5551
         |      +-- framing COZ\x03RE\x01
-        |      +-- ACK / séquences
-        |      +-- commandes moteurs / état robot
+        |      +-- commandes / événements
         |
-        +-- UI diagnostic
-               +-- connexion
-               +-- batterie
-               +-- roues
-               +-- tête
-               +-- lift
-               +-- phare
+        +-- caméra
+        |      +-- ImageChunk
+        |      +-- MiniGray -> JPEG -> Bitmap Android
+        |
+        +-- voix
+        |      +-- android.speech.tts.TextToSpeech
+        |      +-- PCM 16 bits mono 22050 Hz
+        |      +-- μ-law / OutputAudio 0x8e
+        |
+        +-- cubes / éclairage / pilotage
 ```
 
-## Source du protocole
-
-L'implémentation est écrite en Kotlin à partir du comportement documenté publiquement du protocole Cozmo et de la référence **PyCozmo** (MIT), notamment :
-
-- adresse robot : `172.31.1.1:5551/UDP`
-- identifiant de trame : `COZ\x03RE\x01`
-- commandes `Enable`, `DriveWheels`, `MoveHead`, `MoveLift`, `StopAllMotors`, `SetOrigin`, `SyncTime`
-- événement `RobotState`
-
-Référence : https://github.com/zayfod/pycozmo
+Le protocole est réimplémenté à partir du comportement documenté publiquement et de PyCozmo (MIT) :
+https://github.com/zayfod/pycozmo
 
 Aucun binaire propriétaire Anki/Digital Dream Labs n'est inclus dans ce nouveau projet.
 
-## Test V0 sur téléphone
+## Test conseillé
 
-1. Connecter manuellement le téléphone au Wi-Fi émis par Cozmo.
-2. Ouvrir **Cozmo Modern**.
-3. Appuyer sur **Connecter Cozmo**.
-4. Attendre l'état `READY`.
-5. Tester d'abord le phare, puis tête/lift, puis les chenilles à faible vitesse.
+1. Connecter Android au Wi-Fi COZMO_xxxxxx.
+2. Connecter l'application et vérifier READY + batterie.
+3. Tester LEDs backpack et IR.
+4. Activer la caméra.
+5. Activer la recherche des cubes.
+6. Tester une courte phrase dans l'onglet Voix.
+7. Tester ensuite les mouvements.
 
-Le bouton **Arrêter les moteurs** doit être utilisé après les tests de tête/lift : les commandes V0 sont des commandes de vitesse continues.
+La V0 installée précédemment utilisait la clé debug temporaire de GitHub Actions. Le passage à V0.5 nécessite donc probablement une désinstallation unique. À partir de V0.5 la clé est persistante et les V0.x suivantes pourront être installées par-dessus.
 
-## Roadmap immédiate
+## Après validation V0.5
 
-1. valider le handshake sur un vrai Cozmo ;
-2. durcir ACK/retransmission et liaison Android vers le réseau Wi-Fi Cozmo ;
-3. décoder la caméra ;
-4. gérer cubes et événements ;
-5. charger/jouer les animations ;
-6. générer du PCM moderne et utiliser `OutputAudio` pour la voix ;
-7. reconstruire les écrans et mini-jeux.
+Le prochain lot prévu est : visages 128×32, animations et premiers comportements/mini-jeux. Ces fonctions s'appuient sur le flux 30 FPS, donc elles sont volontairement ajoutées après validation de la caméra et de l'audio.
