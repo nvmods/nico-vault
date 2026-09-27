@@ -76,7 +76,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.6",
+                        "Cozmo Modern 0.6.1",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -384,7 +384,7 @@ private fun VoiceCubeTab(
             Text("État : " + speechStatus)
 
             Text(
-                "Le son est filtré/normalisé pour le petit haut-parleur. Les réglages pitch/vitesse permettent d'ajuster sans recompiler.",
+                "Le TTS est envoyé sans traitement audio artificiel ; le codec et le timing sont adaptés au format natif de Cozmo. Pitch/vitesse restent réglables.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
