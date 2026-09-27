@@ -119,12 +119,12 @@ class CozmoConnection {
         sendCommand(0x34, CozmoProtocol.leFloats(speedRadPerSec))
 
     fun setHeadLight(enabled: Boolean) =
-        sendCommand(0x0b, byteArrayOf(if (enabled) 1 else 0))
+        sendCommand(0x0b, byteArrayOf((if (enabled) 1 else 0).toByte()))
 
     fun enableCamera(enabled: Boolean) {
         val mode = if (enabled) 1 else 0
-        sendCommand(0x4c, byteArrayOf(mode.toByte(), 4))
-        sendCommand(0x66, byteArrayOf(0))
+        sendCommand(0x4c, byteArrayOf(mode.toByte(), 4.toByte()))
+        sendCommand(0x66, byteArrayOf(0.toByte()))
     }
 
     private fun initializeAfterFirmwareSignature() {
