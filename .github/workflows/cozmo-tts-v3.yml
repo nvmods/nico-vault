@@ -62,6 +62,12 @@ jobs:
           aarch64-linux-gnu-objdump -d --start-address=0x44780 --stop-address=0x44880 "$SO"
           echo '=== callers containing branch to 0x447c0 (best effort) ==='
           aarch64-linux-gnu-objdump -d "$SO" | grep -B4 -A4 -E 'bl[[:space:]]+447c0' | head -n 200 || true
+          echo '=== error path around 0x44080..0x441b0 ==='
+          aarch64-linux-gnu-objdump -d --start-address=0x44040 --stop-address=0x441c0 "$SO"
+          echo '=== callsites of 0x44154 (error) ==='
+          aarch64-linux-gnu-objdump -d "$SO" | grep -B6 -A6 -E 'bl[[:space:]]+44154' | head -n 240 || true
+          echo '=== nearby strings possibly used by error path ==='
+          strings -tx "$SO" | grep -E 'Network|socket|transport|error|errno|connect|send|recv' | head -n 200 || true
 
       - name: Dump manifest metadata
         run: |
