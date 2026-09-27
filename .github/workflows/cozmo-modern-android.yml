@@ -46,15 +46,15 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          cp cozmo-modern/app/build/outputs/apk/release/app-release.apk CozmoModern-v0.7.2.apk
-          sha256sum CozmoModern-v0.7.2.apk > CozmoModern-v0.7.2.sha256
+          cp cozmo-modern/app/build/outputs/apk/release/app-release.apk CozmoModern-v0.7.3.apk
+          sha256sum CozmoModern-v0.7.3.apk > CozmoModern-v0.7.3.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CozmoModern-v0.7.2
+          name: CozmoModern-v0.7.3
           path: |
-            CozmoModern-v0.7.2.apk
-            CozmoModern-v0.7.2.sha256
+            CozmoModern-v0.7.3.apk
+            CozmoModern-v0.7.3.sha256
           if-no-files-found: error
           retention-days: 30
