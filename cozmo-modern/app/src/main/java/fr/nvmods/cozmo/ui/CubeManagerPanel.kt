@@ -164,6 +164,7 @@ private fun CubeDetailCard(
             )
 
             val objectId = cube.objectId
+            val commandable = cube.connected && objectId != null
 
             if (objectId == null) {
                 Text(
@@ -175,7 +176,7 @@ private fun CubeDetailCard(
 
             if (!cube.connected) {
                 Text(
-                    "Lien BLE momentanément instable : les commandes restent visibles pour éviter le clignotement de l'UI.",
+                    "Lien BLE momentanément instable : commandes verrouillées jusqu'à la reconnexion.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -187,8 +188,9 @@ private fun CubeDetailCard(
             )
 
             CubeColorRow(
+                enabled = commandable,
                 onColor = { color ->
-                    vm.cubeColor(objectId, color)
+                    vm.cubeColor(cube.factoryId, color)
                 }
             )
 
@@ -205,11 +207,12 @@ private fun CubeDetailCard(
                     FilledTonalButton(
                         onClick = {
                             vm.cubeCornerColor(
-                                objectId = objectId,
+                                factoryId = cube.factoryId,
                                 corner = index,
                                 color = nextColor(current)
                             )
                         },
+                        enabled = commandable,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
@@ -227,11 +230,12 @@ private fun CubeDetailCard(
                 FilledTonalButton(
                     onClick = {
                         vm.cubePairPattern(
-                            objectId,
+                            cube.factoryId,
                             BackpackColor.RED,
                             BackpackColor.BLUE
                         )
                     },
+                    enabled = commandable,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("R/B alterné")
@@ -240,11 +244,12 @@ private fun CubeDetailCard(
                 FilledTonalButton(
                     onClick = {
                         vm.cubePairPattern(
-                            objectId,
+                            cube.factoryId,
                             BackpackColor.GREEN,
                             BackpackColor.OFF
                         )
                     },
+                    enabled = commandable,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("1/3 vert")
@@ -258,10 +263,11 @@ private fun CubeDetailCard(
                 FilledTonalButton(
                     onClick = {
                         vm.cubeChaser(
-                            objectId,
+                            cube.factoryId,
                             BackpackColor.BLUE
                         )
                     },
+                    enabled = commandable,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Chaser bleu")
@@ -269,8 +275,9 @@ private fun CubeDetailCard(
 
                 FilledTonalButton(
                     onClick = {
-                        vm.stopCubeChaser(objectId)
+                        vm.stopCubeChaser(cube.factoryId)
                     },
+                    enabled = commandable,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("LEDs off")
@@ -280,8 +287,9 @@ private fun CubeDetailCard(
             ToggleLine(
                 label = "Flux accéléromètre",
                 checked = cube.accelStreaming,
+                enabled = commandable,
                 onChanged = { enabled ->
-                    vm.cubeAccel(objectId, enabled)
+                    vm.cubeAccel(cube.factoryId, enabled)
                 }
             )
 
@@ -307,7 +315,8 @@ private fun CubeDetailCard(
 
 @Composable
 private fun CubeColorRow(
-    onColor: (BackpackColor) -> Unit
+    onColor: (BackpackColor) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -317,30 +326,35 @@ private fun CubeColorRow(
             "R",
             BackpackColor.RED,
             onColor,
+            enabled,
             Modifier.weight(1f)
         )
         ColorButton(
             "V",
             BackpackColor.GREEN,
             onColor,
+            enabled,
             Modifier.weight(1f)
         )
         ColorButton(
             "B",
             BackpackColor.BLUE,
             onColor,
+            enabled,
             Modifier.weight(1f)
         )
         ColorButton(
             "W",
             BackpackColor.WHITE,
             onColor,
+            enabled,
             Modifier.weight(1f)
         )
         ColorButton(
             "Off",
             BackpackColor.OFF,
             onColor,
+            enabled,
             Modifier.weight(1f)
         )
     }
@@ -351,10 +365,12 @@ private fun ColorButton(
     label: String,
     color: BackpackColor,
     onColor: (BackpackColor) -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Button(
         onClick = { onColor(color) },
+        enabled = enabled,
         modifier = modifier
     ) {
         Text(label)
@@ -365,7 +381,8 @@ private fun ColorButton(
 private fun ToggleLine(
     label: String,
     checked: Boolean,
-    onChanged: (Boolean) -> Unit
+    onChanged: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -375,7 +392,8 @@ private fun ToggleLine(
         Text(label, modifier = Modifier.weight(1f))
         Switch(
             checked = checked,
-            onCheckedChange = onChanged
+            onCheckedChange = onChanged,
+            enabled = enabled
         )
     }
 }
