@@ -55,6 +55,17 @@ jobs:
           echo '=== calls to strerror/error ==='
           aarch64-linux-gnu-objdump -d "$SO" | grep -B6 -A6 -E 'bl[[:space:]]+(447c0|44154)' | head -n 300 || true
 
+      - name: Inspect Cozmo engine allocator crash path
+        run: |
+          set -euxo pipefail
+          ENG=work/apk/lib/arm64-v8a/libcozmoEngine.so
+          echo '=== allocator routine around old/new crash PCs ==='
+          aarch64-linux-gnu-objdump -d --start-address=0x12d3d80 --stop-address=0x12d4050 "$ENG"
+          echo '=== wrapper around LR 0x12d274c ==='
+          aarch64-linux-gnu-objdump -d --start-address=0x12d26c0 --stop-address=0x12d27b0 "$ENG"
+          echo '=== direct callers of wrapper 0x12d26ec / 0x12d2768 ==='
+          aarch64-linux-gnu-objdump -d "$ENG" | grep -B5 -A5 -E 'bl[[:space:]]+(12d26ec|12d2768)' | head -n 500 || true
+
   build:
     needs: analyse
     runs-on: ubuntu-latest
