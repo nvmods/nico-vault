@@ -79,6 +79,7 @@ class CozmoConnection {
     private val sendMutex = Mutex()
     private val cameraAssembler = CozmoCameraAssembler()
     private val cubes = linkedMapOf<Long, CubeInfo>()
+    private val connectingCubeFactories = mutableSetOf<Long>()
     private val recentRobotSeq = LinkedHashSet<Int>()
 
     private var socket: DatagramSocket? = null
@@ -161,6 +162,7 @@ class CozmoConnection {
         lastRobotSeq = CozmoProtocol.OOB_SEQ
         pingCounter = 0
         recentRobotSeq.clear()
+        connectingCubeFactories.clear()
         cubes.clear()
 
         _state.value = CozmoState(connection = ConnectionState.DISCONNECTED)
@@ -331,8 +333,17 @@ class CozmoConnection {
 
             var offset = 0
 
+            val frameDurationNanos =
+                744L * 1_000_000_000L / 22_050L
+
+            val streamStart = System.nanoTime()
+            var frameIndex = 0L
+
             while (offset < samples.size) {
-                val payload = ByteArray(744) { 0xff.toByte() }
+                // PyCozmo laisse le reste du dernier paquet à 0.
+                // Le codec Cozmo n'utilise PAS le mapping μ-law téléphonie
+                // standard où 0xff représente le silence.
+                val payload = ByteArray(744)
                 val count = minOf(744, samples.size - offset)
 
                 for (i in 0 until count) {
@@ -341,8 +352,21 @@ class CozmoConnection {
 
                 sendCommand(0x8e, payload)
                 offset += count
+                frameIndex++
 
-                delay(34)
+                // 744 / 22050 = 33,741... ms. On se cale sur une horloge
+                // absolue pour éviter la dérive d'un simple delay(34).
+                val target =
+                    streamStart + frameIndex * frameDurationNanos
+                val remaining =
+                    target - System.nanoTime()
+
+                if (remaining > 0) {
+                    delay(
+                        (remaining + 999_999L) /
+                            1_000_000L
+                    )
+                }
             }
 
             sendCommand(0x8f)
@@ -386,7 +410,11 @@ class CozmoConnection {
         val lsb = (sample shr (position - 4)) and 0x0f
         val value = sign or ((position - 7) shl 4) or lsb
 
-        return (value.inv() and 0xff).toByte()
+        // IMPORTANT : Cozmo n'attend pas le byte μ-law G.711 standard.
+        // Le code validé par PyCozmo renvoie -(~value), soit value + 1.
+        // Notre ancienne inversion (~value) expliquait une voix très
+        // déformée malgré la bonne fréquence de 22,05 kHz.
+        return ((value + 1) and 0xff).toByte()
     }
 
     private fun initializeAfterFirmwareSignature() {
@@ -636,8 +664,12 @@ class CozmoConnection {
 
         if (
             _state.value.cubeDiscovery &&
-            previous?.connected != true
+            previous?.connected != true &&
+            connectingCubeFactories.add(factoryId)
         ) {
+            // ObjectAvailable peut être publié plusieurs fois avant que
+            // ObjectConnectionState arrive. Une seule tentative à la fois :
+            // sinon on inonde le lien radio des cubes avec ObjectConnect.
             val connectPayload =
                 ByteBuffer.allocate(5)
                     .order(ByteOrder.LITTLE_ENDIAN)
@@ -669,6 +701,8 @@ class CozmoConnection {
 
         val previous =
             cubes[factoryId] ?: CubeInfo(factoryId)
+
+        connectingCubeFactories.remove(factoryId)
 
         cubes[factoryId] = previous.copy(
             objectId = objectId,
