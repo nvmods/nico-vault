@@ -15,6 +15,10 @@ on:
       - 'cozmo-v3/**'
   workflow_dispatch:
 
+env:
+  XAPK_URL: https://d.apkpure.net/b/XAPK/com.digitaldreamlabs.cozmo2?version=latest
+  XAPK_SIZE: "442556759"
+
 jobs:
   analyse:
     runs-on: ubuntu-latest
@@ -31,49 +35,147 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p work
-          curl -fL --retry 5 --retry-delay 3 \
-            'https://d.apkpure.net/b/XAPK/com.digitaldreamlabs.cozmo2?version=latest' \
-            -o work/Cozmo_3.6.6.xapk
-          stat -c '%n %s bytes' work/Cozmo_3.6.6.xapk
+          curl -fL --retry 5 --retry-delay 3 "$XAPK_URL" -o work/Cozmo_3.6.6.xapk
+          test "$(stat -c %s work/Cozmo_3.6.6.xapk)" -eq "$XAPK_SIZE"
           sha256sum work/Cozmo_3.6.6.xapk
-          test "$(stat -c %s work/Cozmo_3.6.6.xapk)" -eq 442556759
 
-      - name: Extract APK and ARM64 libraries
+      - name: Extract APK and inspect native error path
         run: |
           set -euxo pipefail
           mkdir -p work/xapk work/apk
           unzip -q work/Cozmo_3.6.6.xapk -d work/xapk
           APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
-          echo "APK=$APK"
           unzip -q "$APK" 'lib/arm64-v8a/libacattsandroid.so' 'lib/arm64-v8a/libcozmoEngine.so' -d work/apk
-          sha256sum "$APK" work/apk/lib/arm64-v8a/libacattsandroid.so work/apk/lib/arm64-v8a/libcozmoEngine.so
-
-      - name: Inspect Acapela strerror and imports
-        run: |
-          set -euxo pipefail
           SO=work/apk/lib/arm64-v8a/libacattsandroid.so
-          echo '=== dynamic symbols ==='
-          aarch64-linux-gnu-readelf -Ws "$SO" | grep -E 'strerror|dlsym|dlopen|android_log|malloc|free' || true
-          echo '=== relocations mentioning strerror ==='
-          aarch64-linux-gnu-readelf -r "$SO" | grep -i strerror || true
-          echo '=== dynamic section / NEEDED ==='
-          aarch64-linux-gnu-readelf -d "$SO" | grep -E 'NEEDED|SONAME' || true
-          echo '=== disassembly around 0x447c0 ==='
-          aarch64-linux-gnu-objdump -d --start-address=0x44780 --stop-address=0x44880 "$SO"
-          echo '=== callers containing branch to 0x447c0 (best effort) ==='
-          aarch64-linux-gnu-objdump -d "$SO" | grep -B4 -A4 -E 'bl[[:space:]]+447c0' | head -n 200 || true
-          echo '=== error path around 0x44080..0x441b0 ==='
+          echo '=== Acapela strerror ==='
+          aarch64-linux-gnu-readelf -Ws "$SO" | grep -E 'strerror|android_log|malloc|free' || true
+          aarch64-linux-gnu-objdump -d --start-address=0x447c0 --stop-address=0x44854 "$SO"
+          echo '=== error path ==='
           aarch64-linux-gnu-objdump -d --start-address=0x44040 --stop-address=0x441c0 "$SO"
-          echo '=== callsites of 0x44154 (error) ==='
-          aarch64-linux-gnu-objdump -d "$SO" | grep -B6 -A6 -E 'bl[[:space:]]+44154' | head -n 240 || true
-          echo '=== nearby strings possibly used by error path ==='
-          strings -tx "$SO" | grep -E 'Network|socket|transport|error|errno|connect|send|recv' | head -n 200 || true
+          echo '=== calls to strerror/error ==='
+          aarch64-linux-gnu-objdump -d "$SO" | grep -B6 -A6 -E 'bl[[:space:]]+(447c0|44154)' | head -n 300 || true
 
-      - name: Dump manifest metadata
+  build:
+    needs: analyse
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
         run: |
           set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils-aarch64-linux-gnu unzip zip curl jq openjdk-17-jre-headless
+          java -version
+          APKTOOL_URL="$(curl -fsSL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | jq -r '.assets[] | select(.name | test("^apktool_.*\\.jar$")) | .browser_download_url' | head -n 1)"
+          test -n "$APKTOOL_URL"
+          curl -fL "$APKTOOL_URL" -o apktool.jar
+          java -jar apktool.jar --version
+
+      - name: Download original Cozmo 3.6.6
+        run: |
+          set -euxo pipefail
+          mkdir -p work/xapk
+          curl -fL --retry 5 --retry-delay 3 "$XAPK_URL" -o work/Cozmo_3.6.6.xapk
+          test "$(stat -c %s work/Cozmo_3.6.6.xapk)" -eq "$XAPK_SIZE"
+          unzip -q work/Cozmo_3.6.6.xapk -d work/xapk
           APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          cp "$APK" work/Cozmo_3.6.6_original.apk
+          sha256sum work/Cozmo_3.6.6_original.apk
+
+      - name: Decode APK without touching IL2CPP bytecode
+        run: |
+          set -euxo pipefail
+          java -jar apktool.jar d -f -s work/Cozmo_3.6.6_original.apk -o work/decompiled
+
+      - name: Apply Android compatibility manifest patch
+        run: |
+          set -euxo pipefail
+          python3 cozmo-v3/patch_manifest.py work/decompiled/AndroidManifest.xml
+          grep -E 'uses-sdk|targetSdkVersion|allowNativeHeapPointerTagging|requestLegacyExternalStorage' work/decompiled/AndroidManifest.xml
+
+      - name: Patch Acapela ARM64 strerror recursion
+        run: |
+          set -euxo pipefail
+          SO=work/decompiled/lib/arm64-v8a/libacattsandroid.so
+          sha256sum "$SO"
+          python3 cozmo-v3/patch_acapela.py "$SO"
+          sha256sum "$SO"
+          aarch64-linux-gnu-objdump -d --start-address=0x447c0 --stop-address=0x44854 "$SO"
+
+      - name: Rebuild APK
+        run: |
+          set -euxo pipefail
+          java -jar apktool.jar b work/decompiled -o work/Cozmo_3.6.6_android15_tts_v3-unsigned.apk
+
+      - name: Zipalign and sign
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          "$ZIPALIGN" -f -p 4 work/Cozmo_3.6.6_android15_tts_v3-unsigned.apk work/Cozmo_3.6.6_android15_tts_v3-aligned.apk
+          keytool -genkeypair -noprompt \
+            -keystore work/cozmo-v3-test.jks \
+            -storepass cozmo-v3-test \
+            -keypass cozmo-v3-test \
+            -alias cozmo-v3 \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Cozmo Android15 TTS V3,OU=Diagnostic,O=nvmods,C=FR"
+          "$APKSIGNER" sign \
+            --ks work/cozmo-v3-test.jks \
+            --ks-key-alias cozmo-v3 \
+            --ks-pass pass:cozmo-v3-test \
+            --key-pass pass:cozmo-v3-test \
+            --out work/Cozmo_3.6.6_android15_tts_v3.apk \
+            work/Cozmo_3.6.6_android15_tts_v3-aligned.apk
+          "$APKSIGNER" verify --verbose --print-certs work/Cozmo_3.6.6_android15_tts_v3.apk
+          "$ZIPALIGN" -c -p 4 work/Cozmo_3.6.6_android15_tts_v3.apk
+
+      - name: Verify final APK
+        run: |
+          set -euxo pipefail
+          FINAL=work/Cozmo_3.6.6_android15_tts_v3.apk
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
-          echo "AAPT2=$AAPT"
-          "$AAPT" dump badging "$APK" | head -n 30 || true
-          "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep -E -A2 -B2 'uses-sdk|targetSdkVersion|minSdkVersion|allowNativeHeapPointerTagging' || true
+          "$AAPT" dump badging "$FINAL" | head -n 12
+          "$AAPT" dump badging "$FINAL" | grep -q "targetSdkVersion:'29'"
+          unzip -p "$FINAL" lib/arm64-v8a/libacattsandroid.so > work/libacattsandroid-final.so
+          aarch64-linux-gnu-objdump -d --start-address=0x447c0 --stop-address=0x44820 work/libacattsandroid-final.so | tee work/acapela-patch-check.txt
+          grep -q 'b[[:space:]]*44814' work/acapela-patch-check.txt
+          sha256sum "$FINAL" | tee work/SHA256SUMS.txt
+          stat -c '%n %s bytes' "$FINAL"
+
+      - name: Prepare test package
+        run: |
+          set -euxo pipefail
+          mkdir -p work/artifact
+          cp work/Cozmo_3.6.6_android15_tts_v3.apk work/artifact/
+          cp work/SHA256SUMS.txt work/artifact/
+          cp cozmo-v3/README.md work/artifact/README_Cozmo_V3.txt
+          cat > work/artifact/install_cozmo_v3.bat <<'BAT'
+          @echo off
+          echo === Cozmo 3.6.6 Android 15 TTS V3 ===
+          adb devices
+          echo.
+          echo ATTENTION: la signature de test differe de l'APK officielle.
+          echo L'OBB main.11.com.digitaldreamlabs.cozmo2.obb doit deja etre conserve.
+          pause
+          adb uninstall com.digitaldreamlabs.cozmo2
+          adb install "Cozmo_3.6.6_android15_tts_v3.apk"
+          echo.
+          echo Verification compat heap tagging:
+          adb shell am compat reset NATIVE_HEAP_POINTER_TAGGING com.digitaldreamlabs.cozmo2
+          echo.
+          echo Replacer ensuite l'OBB original dans:
+          echo /sdcard/Android/obb/com.digitaldreamlabs.cozmo2/
+          pause
+          BAT
+
+      - name: Upload V3 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cozmo-3.6.6-Android15-TTS-V3
+          path: work/artifact/*
+          if-no-files-found: error
+          retention-days: 30
