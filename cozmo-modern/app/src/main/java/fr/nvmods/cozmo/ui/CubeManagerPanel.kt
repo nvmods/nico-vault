@@ -42,11 +42,9 @@ internal fun CubeManagerPanel(
                 onChanged = vm::discoverCubes
             )
 
-            val known = state.cubes.filter {
-                it.objectId != null
-            }
+            val known = state.cubes
             val connected = known.filter {
-                it.connected
+                it.connected && it.objectId != null
             }
 
             // Une fois un cube connu, conserver ce bloc à l'écran même si
@@ -59,6 +57,7 @@ internal fun CubeManagerPanel(
                 ToggleLine(
                     label = "Accéléromètres bruts (30 ms) — tous",
                     checked = allAccel,
+                    enabled = connected.isNotEmpty(),
                     onChanged = vm::allCubeAccel
                 )
 
@@ -68,6 +67,7 @@ internal fun CubeManagerPanel(
                 )
 
                 CubeColorRow(
+                    enabled = connected.isNotEmpty(),
                     onColor = vm::allCubeColor
                 )
 
@@ -82,6 +82,7 @@ internal fun CubeManagerPanel(
                                 BackpackColor.BLUE
                             )
                         },
+                        enabled = connected.isNotEmpty(),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("1/3 R • 2/4 B")
@@ -94,6 +95,7 @@ internal fun CubeManagerPanel(
                                 BackpackColor.OFF
                             )
                         },
+                        enabled = connected.isNotEmpty(),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("1/3 V • 2/4 off")
@@ -166,21 +168,20 @@ private fun CubeDetailCard(
             val objectId = cube.objectId
             val commandable = cube.connected && objectId != null
 
-            if (objectId == null) {
-                Text(
-                    "En attente du premier object_id attribué par Cozmo.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                return@Column
-            }
-
-            if (!cube.connected) {
-                Text(
-                    "Lien BLE momentanément instable : commandes verrouillées jusqu'à la reconnexion.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
+            Text(
+                if (commandable) {
+                    "Liaison cube prête"
+                } else {
+                    "Liaison cube inactive — commandes verrouillées"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color =
+                    if (commandable) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+            )
 
             Text(
                 "4 LEDs indépendantes",
