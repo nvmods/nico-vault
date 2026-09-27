@@ -1,0 +1,389 @@
+package fr.nvmods.cozmo.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import fr.nvmods.cozmo.protocol.BackpackColor
+import fr.nvmods.cozmo.protocol.CozmoState
+import fr.nvmods.cozmo.protocol.CubeInfo
+
+@Composable
+internal fun CubeManagerPanel(
+    state: CozmoState,
+    vm: CozmoViewModel
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Cubes BLE",
+                fontWeight = FontWeight.SemiBold
+            )
+
+            ToggleLine(
+                label = "Recherche / connexion automatique",
+                checked = state.cubeDiscovery,
+                onChanged = vm::discoverCubes
+            )
+
+            val connected = state.cubes.filter {
+                it.connected && it.objectId != null
+            }
+
+            if (connected.isNotEmpty()) {
+                val allAccel =
+                    connected.all { it.accelStreaming }
+
+                ToggleLine(
+                    label = "Accéléromètres bruts (30 ms) — tous",
+                    checked = allAccel,
+                    onChanged = vm::allCubeAccel
+                )
+
+                Text(
+                    "Commandes globales",
+                    fontWeight = FontWeight.Medium
+                )
+
+                CubeColorRow(
+                    onColor = vm::allCubeColor
+                )
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            vm.allCubePairPattern(
+                                BackpackColor.RED,
+                                BackpackColor.BLUE
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("1/3 R • 2/4 B")
+                    }
+
+                    FilledTonalButton(
+                        onClick = {
+                            vm.allCubePairPattern(
+                                BackpackColor.GREEN,
+                                BackpackColor.OFF
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("1/3 V • 2/4 off")
+                    }
+                }
+            }
+
+            if (state.cubes.isEmpty()) {
+                Text(
+                    "Aucun LightCube annoncé pour le moment.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                state.cubes.forEach { cube ->
+                    CubeDetailCard(
+                        cube = cube,
+                        vm = vm
+                    )
+                }
+            }
+
+            Text(
+                "Le gestionnaire connecte désormais les cubes 1 → 2 → 3 séquentiellement. " +
+                    "factory_id = identité permanente ; object_id = identifiant temporaire de la connexion BLE.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun CubeDetailCard(
+    cube: CubeInfo,
+    vm: CozmoViewModel
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                cube.displayName +
+                    " — factory 0x" +
+                    cube.factoryId.toString(16),
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                "type=" + cube.objectType +
+                    " • object_id=" + (cube.objectId?.toString() ?: "—") +
+                    " • RSSI=" + (cube.rssi?.toString() ?: "—")
+            )
+
+            Text(
+                "BLE=" + if (cube.connected) "connecté" else "déconnecté" +
+                    " • essais=" + cube.connectAttempts +
+                    " • batterie=" + (cube.batteryLevel?.toString() ?: "—") +
+                    " • paquets manqués=" + (cube.missedPackets?.toString() ?: "—"),
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Text(
+                "Dernier événement : " + cube.lastEvent,
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            val objectId = cube.objectId
+
+            if (!cube.connected || objectId == null) {
+                Text(
+                    "En attente d'une connexion BLE active avant pilotage.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                return@Column
+            }
+
+            Text(
+                "4 LEDs indépendantes",
+                fontWeight = FontWeight.Medium
+            )
+
+            CubeColorRow(
+                onColor = { color ->
+                    vm.cubeColor(objectId, color)
+                }
+            )
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                repeat(4) { index ->
+                    val current =
+                        cube.ledColors.getOrElse(index) {
+                            BackpackColor.OFF
+                        }
+
+                    FilledTonalButton(
+                        onClick = {
+                            vm.cubeCornerColor(
+                                objectId = objectId,
+                                corner = index,
+                                color = nextColor(current)
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            "L" + (index + 1) +
+                                " " + shortColor(current)
+                        )
+                    }
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        vm.cubePairPattern(
+                            objectId,
+                            BackpackColor.RED,
+                            BackpackColor.BLUE
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("R/B alterné")
+                }
+
+                FilledTonalButton(
+                    onClick = {
+                        vm.cubePairPattern(
+                            objectId,
+                            BackpackColor.GREEN,
+                            BackpackColor.OFF
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("1/3 vert")
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        vm.cubeChaser(
+                            objectId,
+                            BackpackColor.BLUE
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Chaser bleu")
+                }
+
+                FilledTonalButton(
+                    onClick = {
+                        vm.stopCubeChaser(objectId)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("LEDs off")
+                }
+            }
+
+            ToggleLine(
+                label = "Flux accéléromètre",
+                checked = cube.accelStreaming,
+                onChanged = { enabled ->
+                    vm.cubeAccel(objectId, enabled)
+                }
+            )
+
+            Text(
+                "Accel X/Y/Z : " +
+                    fmt(cube.accelX) + " / " +
+                    fmt(cube.accelY) + " / " +
+                    fmt(cube.accelZ)
+            )
+
+            Text(
+                "Face haute : " + cube.upAxis.label +
+                    " • mouvement : " +
+                    if (cube.moving) "oui" else "non" +
+                    " • taps : " + cube.tapCount +
+                    " • intensité : " +
+                    (cube.tapIntensity?.toString() ?: "—"),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun CubeColorRow(
+    onColor: (BackpackColor) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        ColorButton(
+            "R",
+            BackpackColor.RED,
+            onColor,
+            Modifier.weight(1f)
+        )
+        ColorButton(
+            "V",
+            BackpackColor.GREEN,
+            onColor,
+            Modifier.weight(1f)
+        )
+        ColorButton(
+            "B",
+            BackpackColor.BLUE,
+            onColor,
+            Modifier.weight(1f)
+        )
+        ColorButton(
+            "W",
+            BackpackColor.WHITE,
+            onColor,
+            Modifier.weight(1f)
+        )
+        ColorButton(
+            "Off",
+            BackpackColor.OFF,
+            onColor,
+            Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun ColorButton(
+    label: String,
+    color: BackpackColor,
+    onColor: (BackpackColor) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = { onColor(color) },
+        modifier = modifier
+    ) {
+        Text(label)
+    }
+}
+
+@Composable
+private fun ToggleLine(
+    label: String,
+    checked: Boolean,
+    onChanged: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChanged
+        )
+    }
+}
+
+private fun nextColor(
+    current: BackpackColor
+): BackpackColor =
+    when (current) {
+        BackpackColor.OFF -> BackpackColor.RED
+        BackpackColor.RED -> BackpackColor.GREEN
+        BackpackColor.GREEN -> BackpackColor.BLUE
+        BackpackColor.BLUE -> BackpackColor.WHITE
+        BackpackColor.WHITE -> BackpackColor.OFF
+    }
+
+private fun shortColor(
+    color: BackpackColor
+): String =
+    when (color) {
+        BackpackColor.OFF -> "off"
+        BackpackColor.RED -> "R"
+        BackpackColor.GREEN -> "V"
+        BackpackColor.BLUE -> "B"
+        BackpackColor.WHITE -> "W"
+    }
+
+private fun fmt(value: Float?): String =
+    value?.let { "%.2f".format(it) } ?: "—"
