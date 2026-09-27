@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -41,13 +42,19 @@ internal fun CubeManagerPanel(
                 onChanged = vm::discoverCubes
             )
 
-            val connected = state.cubes.filter {
-                it.connected && it.objectId != null
+            val known = state.cubes.filter {
+                it.objectId != null
+            }
+            val connected = known.filter {
+                it.connected
             }
 
-            if (connected.isNotEmpty()) {
+            // Une fois un cube connu, conserver ce bloc à l'écran même si
+            // le BLE signale une micro-coupure : aucun saut vertical de l'UI.
+            if (known.isNotEmpty()) {
                 val allAccel =
-                    connected.all { it.accelStreaming }
+                    connected.isNotEmpty() &&
+                        connected.all { it.accelStreaming }
 
                 ToggleLine(
                     label = "Accéléromètres bruts (30 ms) — tous",
@@ -101,10 +108,12 @@ internal fun CubeManagerPanel(
                 )
             } else {
                 state.cubes.forEach { cube ->
-                    CubeDetailCard(
-                        cube = cube,
-                        vm = vm
-                    )
+                    key(cube.factoryId) {
+                        CubeDetailCard(
+                            cube = cube,
+                            vm = vm
+                        )
+                    }
                 }
             }
 
