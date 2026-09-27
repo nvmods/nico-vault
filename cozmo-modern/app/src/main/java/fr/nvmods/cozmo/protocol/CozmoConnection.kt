@@ -275,10 +275,10 @@ class CozmoConnection {
     }
 
     fun setCubeColor(
-        objectId: Long,
+        factoryId: Long,
         color: BackpackColor
     ) {
-        cubeManager.setSolidColor(objectId, color)
+        cubeManager.setSolidColor(factoryId, color)
     }
 
     fun setAllCubeColor(color: BackpackColor) {
@@ -286,12 +286,12 @@ class CozmoConnection {
     }
 
     fun setCubePairPattern(
-        objectId: Long,
+        factoryId: Long,
         first: BackpackColor,
         second: BackpackColor
     ) {
         cubeManager.setPairPattern(
-            objectId = objectId,
+            factoryId = factoryId,
             first = first,
             second = second
         )
@@ -305,22 +305,22 @@ class CozmoConnection {
     }
 
     fun setCubeCornerColor(
-        objectId: Long,
+        factoryId: Long,
         corner: Int,
         color: BackpackColor
     ) {
         cubeManager.setCornerColor(
-            objectId = objectId,
+            factoryId = factoryId,
             corner = corner,
             color = color
         )
     }
 
     fun setCubeAccelStreaming(
-        objectId: Long,
+        factoryId: Long,
         enabled: Boolean
     ) {
-        cubeManager.setAccelStreaming(objectId, enabled)
+        cubeManager.setAccelStreaming(factoryId, enabled)
     }
 
     fun setAllCubeAccelStreaming(enabled: Boolean) {
@@ -328,14 +328,14 @@ class CozmoConnection {
     }
 
     fun startCubeChaser(
-        objectId: Long,
+        factoryId: Long,
         color: BackpackColor
     ) {
-        cubeManager.startChaser(objectId, color)
+        cubeManager.startChaser(factoryId, color)
     }
 
-    fun stopCubeChaser(objectId: Long) {
-        cubeManager.stopChaser(objectId)
+    fun stopCubeChaser(factoryId: Long) {
+        cubeManager.stopChaser(factoryId)
     }
 
     suspend fun playPcm22050(samples: ShortArray) {
