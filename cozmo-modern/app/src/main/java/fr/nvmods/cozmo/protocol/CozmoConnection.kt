@@ -87,11 +87,8 @@ class CozmoConnection {
             sendCommand = { id, payload ->
                 sendCommand(id, payload)
             },
-            sendSequential = { commands, waitUntilAcknowledged ->
-                sendSequential(
-                    commands = commands,
-                    waitUntilAcknowledged = waitUntilAcknowledged
-                )
+            sendBatch = { commands ->
+                sendBatch(commands)
             },
             onChanged = { cubes ->
                 _state.value = _state.value.copy(cubes = cubes)
