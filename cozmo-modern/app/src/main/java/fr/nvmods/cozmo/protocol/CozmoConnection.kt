@@ -299,10 +299,11 @@ class CozmoConnection {
             // On garde donc les deux commandes adjacentes mais dans DEUX
             // trames ENGINE distinctes, comme l'exemple PyCozmo validé.
             sendSequential(
-                listOf(
+                commands = listOf(
                     OutboundCommand(0x10, selectCube),
                     OutboundCommand(0x04, lights)
-                )
+                ),
+                waitUntilAcknowledged = true
             )
 
             val entry = cubes.entries.firstOrNull {
@@ -447,9 +448,15 @@ class CozmoConnection {
         reliableTransport?.enqueueBatch(commands)
     }
 
-    private fun sendSequential(commands: List<OutboundCommand>) {
+    private fun sendSequential(
+        commands: List<OutboundCommand>,
+        waitUntilAcknowledged: Boolean = false
+    ) {
         if (socket == null) return
-        reliableTransport?.enqueueSequential(commands)
+        reliableTransport?.enqueueSequential(
+            commands = commands,
+            waitUntilAcknowledged = waitUntilAcknowledged
+        )
     }
 
     private suspend fun sendFrameNow(bytes: ByteArray) {
