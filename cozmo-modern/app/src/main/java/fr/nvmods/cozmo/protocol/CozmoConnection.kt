@@ -309,6 +309,42 @@ class CozmoConnection {
         sendCommand(0x36, payload)
     }
 
+    /**
+     * Keyframe tête natif du moteur d'animation Anki.
+     *
+     * La 3.6.6 n'utilise pas SetHeadAngle pour ses clips de personnalité :
+     * elle envoie AnimHead (0x93) avec une cible ABSOLUE en degrés.
+     */
+    fun animHead(
+        angleDeg: Int,
+        durationMs: Int,
+        variabilityDeg: Int = 0
+    ) {
+        val payload = byteArrayOf(
+            durationMs.coerceIn(0, 255).toByte(),
+            variabilityDeg.coerceIn(-128, 127).toByte(),
+            angleDeg.coerceIn(-128, 127).toByte()
+        )
+        sendCommand(0x93, payload)
+    }
+
+    /**
+     * Keyframe lift natif du moteur d'animation Anki (0x94).
+     * Les animations officielles utilisent 0 comme position basse.
+     */
+    fun animLift(
+        heightMm: Int,
+        durationMs: Int,
+        variabilityMm: Int = 0
+    ) {
+        val payload = byteArrayOf(
+            durationMs.coerceIn(0, 255).toByte(),
+            variabilityMm.coerceIn(0, 255).toByte(),
+            heightMm.coerceIn(0, 255).toByte()
+        )
+        sendCommand(0x94, payload)
+    }
+
     fun setHeadLight(enabled: Boolean) {
         _state.value = _state.value.copy(headLightEnabled = enabled)
         sendCommand(
@@ -622,11 +658,10 @@ class CozmoConnection {
 
         _state.value = _state.value.copy(connection = ConnectionState.READY)
 
-        // Position de repos stable à l'initialisation : tête au milieu de sa
-        // course, lift en bas. On utilise les vraies consignes de position,
-        // jamais une impulsion de vitesse qui pourrait finir en butée.
-        setHeadAngle(HEAD_NEUTRAL_RAD, maxSpeedRadPerSec = 1.8f)
-        setLiftHeight(MIN_LIFT_HEIGHT_MM, maxSpeedRadPerSec = 1.4f)
+        // IMPORTANT : ne pas forcer une pose mécanique au passage READY.
+        // Le moteur Anki 3.6.6 laisse les animations d'entrée définir tête et
+        // lift. Un SetHeadAngle générique ici n'existe pas dans la séquence
+        // originale et provoquait une mise en butée sur notre robot.
         setFaceExpression(CozmoFaceExpression.NEUTRAL)
     }
 
