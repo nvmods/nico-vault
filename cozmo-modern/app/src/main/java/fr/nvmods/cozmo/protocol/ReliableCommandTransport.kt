@@ -138,8 +138,8 @@ internal class ReliableCommandTransport(
      * attendre le prochain cycle de collecte.
      */
     suspend fun sendImmediate(command: OutboundCommand) {
-        txMutex.withLock {
-            while (scope.isActive) {
+        while (scope.isActive) {
+            val sent = txMutex.withLock {
                 val packet = mutex.withLock {
                     if (window.isFull()) {
                         null
@@ -154,12 +154,20 @@ internal class ReliableCommandTransport(
 
                 if (packet != null) {
                     sendSequencedPackets(listOf(packet))
-                    return
+                    true
+                } else {
+                    false
                 }
-
-                // Les ACK peuvent libérer la fenêtre pendant cette attente.
-                delay(2)
             }
+
+            if (sent) return
+
+            // IMPORTANT : on attend HORS du verrou TX.
+            // Sinon une fenêtre pleine peut bloquer le sender général qui doit
+            // justement retransmettre les paquets non acquittés pour libérer
+            // la fenêtre. C'était un deadlock émission uniquement : la
+            // télémétrie continuait d'arriver mais écran/moteurs/audio mouraient.
+            delay(2)
         }
     }
 
