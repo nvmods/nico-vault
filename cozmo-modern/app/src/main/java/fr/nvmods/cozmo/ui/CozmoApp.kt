@@ -82,12 +82,12 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.10.3",
+                        "Cozmo Modern 0.11.0",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Transport fiable + caméra + cubes + TTS Android",
+                        "Liaison stable + caméra + cubes + personnalité autonome",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
