@@ -122,6 +122,38 @@ internal class ReliableCommandTransport(
         }
     }
 
+    /**
+     * Envoi cadencé pour les trames audio.
+     *
+     * Le collecteur général regroupe normalement les commandes toutes les
+     * 12 ms. C'est parfait pour les moteurs/cubes, mais ce jitter est audible
+     * sur le flux OutputAudio à 30 Hz. On réserve donc immédiatement un numéro
+     * de séquence dans la même fenêtre fiable puis on émet la trame sans
+     * attendre le prochain cycle de collecte.
+     */
+    suspend fun sendImmediate(command: OutboundCommand) {
+        while (scope.isActive) {
+            val packet = mutex.withLock {
+                if (window.isFull()) {
+                    null
+                } else {
+                    val seq = window.put(command)
+                    if (lastAckTimeNanos == 0L) {
+                        lastAckTimeNanos = System.nanoTime()
+                    }
+                    seq to command
+                }
+            }
+
+            if (packet != null) {
+                sendSequencedPackets(listOf(packet))
+                return
+            }
+
+            delay(2)
+        }
+    }
+
     fun acknowledge(ack: Int) {
         if (ack == CozmoProtocol.OOB_SEQ) return
 
