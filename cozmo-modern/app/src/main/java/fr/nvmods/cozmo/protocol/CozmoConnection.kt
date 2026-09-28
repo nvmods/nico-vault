@@ -43,7 +43,8 @@ data class CozmoState(
     val backpackColor: BackpackColor = BackpackColor.OFF,
     val cubeDiscovery: Boolean = false,
     val cubes: List<CubeInfo> = emptyList(),
-    val audioStreaming: Boolean = false
+    val audioStreaming: Boolean = false,
+    val faceExpression: CozmoFaceExpression = CozmoFaceExpression.NEUTRAL
 )
 
 enum class ConnectionState {
@@ -80,6 +81,7 @@ class CozmoConnection {
     private var reliableTransport: ReliableCommandTransport? = null
 
     private var backpackJob: Job? = null
+    private var faceRefreshJob: Job? = null
 
     private val cubeManager by lazy {
         CubeManager(
@@ -148,6 +150,9 @@ class CozmoConnection {
     fun disconnect() {
         backpackJob?.cancel()
         backpackJob = null
+
+        faceRefreshJob?.cancel()
+        faceRefreshJob = null
 
         cubeManager.reset()
 
@@ -242,6 +247,42 @@ class CozmoConnection {
             lastError = null
         )
         cubeManager.setDiscovery(enabled)
+    }
+
+    fun setFaceExpression(expression: CozmoFaceExpression) {
+        _state.value = _state.value.copy(faceExpression = expression)
+
+        if (_state.value.connection != ConnectionState.READY) {
+            return
+        }
+
+        sendCommand(
+            CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
+            CozmoFaceDisplay.payload(expression)
+        )
+
+        ensureFaceRefresh()
+    }
+
+    private fun ensureFaceRefresh() {
+        if (faceRefreshJob?.isActive == true) return
+
+        faceRefreshJob = scope.launch {
+            while (isActive) {
+                delay(FACE_REFRESH_MS)
+
+                if (_state.value.connection != ConnectionState.READY) {
+                    continue
+                }
+
+                sendCommand(
+                    CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
+                    CozmoFaceDisplay.payload(
+                        _state.value.faceExpression
+                    )
+                )
+            }
+        }
     }
 
     fun setRobotVolume(percent: Float) {
@@ -438,6 +479,7 @@ class CozmoConnection {
         )
 
         _state.value = _state.value.copy(connection = ConnectionState.READY)
+        setFaceExpression(CozmoFaceExpression.NEUTRAL)
     }
 
     private fun sendCommand(
@@ -676,6 +718,7 @@ class CozmoConnection {
     }
 
     companion object {
+        private const val FACE_REFRESH_MS = 12_000L
         const val HEAD_SPEED = 1.5f
         const val LIFT_SPEED = 1.5f
         const val DRIVE_SPEED = 70f
