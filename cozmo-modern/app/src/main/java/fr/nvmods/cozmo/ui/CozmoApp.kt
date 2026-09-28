@@ -107,6 +107,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
                     1 -> CameraTab(state, vm)
                     2 -> VoiceCubeTab(state, speechStatus, vm)
                     else -> PersonalityTab(
+                        robotState = state,
                         state = personalityState,
                         log = personalityLog,
                         vm = vm
@@ -414,6 +415,7 @@ private fun VoiceCubeTab(
 
 @Composable
 private fun PersonalityTab(
+    robotState: CozmoState,
     state: PersonalityState,
     log: List<PersonalityLogEntry>,
     vm: CozmoViewModel
@@ -462,6 +464,63 @@ private fun PersonalityTab(
             Text(
                 "Interactions : " + state.interactions +
                     "  •  ticks : " + state.idleTicks,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        ControlCard("Capteurs du châssis — diagnostic") {
+            Text(
+                "Orientation : " + robotState.chassisOrientation.name,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                "Soulevé=" + yesNo(robotState.pickedUp) +
+                    " • chute=" + yesNo(robotState.falling) +
+                    " • bord=" + yesNo(robotState.cliffDetected)
+            )
+
+            Text(
+                "Chargeur=" + yesNo(robotState.onCharger) +
+                    " • charge=" + yesNo(robotState.charging) +
+                    " • roues=" + yesNo(robotState.wheelsMoving)
+            )
+
+            Text(
+                "Angle=" + format2(robotState.poseAngleRad) +
+                    " rad • pitch=" + format2(robotState.posePitchRad) + " rad"
+            )
+
+            Text(
+                "Roues : G " + format1(robotState.leftWheelSpeedMmps) +
+                    " / D " + format1(robotState.rightWheelSpeedMmps) +
+                    " mm/s"
+            )
+
+            Text(
+                "Accéléro : X " + format2(robotState.accelX) +
+                    " • Y " + format2(robotState.accelY) +
+                    " • Z " + format2(robotState.accelZ)
+            )
+
+            Text(
+                "Gyro : X " + format2(robotState.gyroX) +
+                    " • Y " + format2(robotState.gyroY) +
+                    " • Z " + format2(robotState.gyroZ)
+            )
+
+            Text(
+                "Cliff raw : " +
+                    robotState.cliffRaw.joinToString(" / ")
+            )
+
+            Text(
+                "Touch backpack raw : " +
+                    (robotState.backpackTouchRaw?.toString() ?: "—")
+            )
+
+            Text(
+                "Test utile : soulève Cozmo, pose-le sur le dos/côté puis approche doucement un bord sans le laisser tomber. Les valeurs doivent changer immédiatement.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
@@ -605,6 +664,15 @@ private fun ColorButton(
         )
     }
 }
+
+private fun yesNo(value: Boolean): String =
+    if (value) "oui" else "non"
+
+private fun format1(value: Float?): String =
+    value?.let { "%.1f".format(it) } ?: "—"
+
+private fun format2(value: Float?): String =
+    value?.let { "%.2f".format(it) } ?: "—"
 
 @Composable
 private fun ScrollColumn(content: @Composable () -> Unit) {
