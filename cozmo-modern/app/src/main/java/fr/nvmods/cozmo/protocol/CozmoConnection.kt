@@ -292,6 +292,23 @@ class CozmoConnection {
         ensureFaceRefresh()
     }
 
+    suspend fun playFaceAnimation(
+        animation: CozmoFaceAnimation,
+        returnTo: CozmoFaceExpression = CozmoFaceExpression.NEUTRAL
+    ) {
+        if (_state.value.connection != ConnectionState.READY) return
+
+        CozmoFaceDisplay.frames(animation).forEach { frame ->
+            sendCommand(
+                CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
+                frame.payload
+            )
+            delay(frame.durationMs)
+        }
+
+        setFaceExpression(returnTo)
+    }
+
     private fun ensureFaceRefresh() {
         if (faceRefreshJob?.isActive == true) return
 
@@ -741,14 +758,13 @@ class CozmoConnection {
                 _state.value.backpackTouchRaw
             }
 
-        // Même logique que PyCozmo pour classifier l'orientation du body.
-        val orientation = when {
-            poseAngle < -0.4f -> ChassisOrientation.ON_LEFT_SIDE
-            poseAngle > 0.4f -> ChassisOrientation.ON_RIGHT_SIDE
-            posePitch < -1.0f -> ChassisOrientation.ON_FACE
-            posePitch > 1.0f -> ChassisOrientation.ON_BACK
-            else -> ChassisOrientation.ON_THREADS
-        }
+        // poseAngle est le cap/yaw dans le plan : il ne dit absolument pas
+        // si Cozmo est couché sur un côté. Pour le roulis on utilise la
+        // composante latérale de la gravité mesurée par l'accéléromètre.
+        val orientation = classifyChassisOrientation(
+            posePitchRad = posePitch,
+            accelY = accelY
+        )
 
         _state.value = _state.value.copy(
             connection = ConnectionState.READY,
@@ -804,6 +820,19 @@ class CozmoConnection {
 
     companion object {
         private const val FACE_REFRESH_MS = 12_000L
+        private const val SIDE_ACCEL_THRESHOLD = 6_000f
+
+        internal fun classifyChassisOrientation(
+            posePitchRad: Float,
+            accelY: Float
+        ): ChassisOrientation =
+            when {
+                posePitchRad < -1.0f -> ChassisOrientation.ON_FACE
+                posePitchRad > 1.0f -> ChassisOrientation.ON_BACK
+                accelY < -SIDE_ACCEL_THRESHOLD -> ChassisOrientation.ON_LEFT_SIDE
+                accelY > SIDE_ACCEL_THRESHOLD -> ChassisOrientation.ON_RIGHT_SIDE
+                else -> ChassisOrientation.ON_THREADS
+            }
         private const val STATUS_IS_PICKED_UP = 0x0008L
         private const val STATUS_IS_FALLING = 0x0020L
         private const val STATUS_IS_ON_CHARGER = 0x1000L
