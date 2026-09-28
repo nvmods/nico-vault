@@ -82,7 +82,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.14.0",
+                        "Cozmo Modern 0.15.0",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -463,9 +463,17 @@ private fun PersonalityTab(
             Text("Dernière décision : " + state.lastDecision)
             Text(
                 "Interactions : " + state.interactions +
-                    "  •  ticks : " + state.idleTicks,
+                    "  •  ticks : " + state.idleTicks +
+                    "  •  erreurs récupérées : " + state.recoveredFaults,
                 style = MaterialTheme.typography.bodySmall
             )
+
+            state.lastFault?.let { fault ->
+                Text(
+                    "Dernière erreur récupérée : " + fault,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
 
         ControlCard("Capteurs du châssis — diagnostic") {
