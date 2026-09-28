@@ -26,6 +26,11 @@ data class PersonalityState(
 sealed interface PersonalityEvent {
     data class FaceDetected(val name: String? = null) : PersonalityEvent
     data class CubeDetected(val cubeId: Long? = null) : PersonalityEvent
+    data class CubeTapped(
+        val cubeId: Long,
+        val intensity: Int? = null
+    ) : PersonalityEvent
+    data class CubeMoved(val cubeId: Long) : PersonalityEvent
     data object CubeLost : PersonalityEvent
     data object PickedUp : PersonalityEvent
     data object PutDown : PersonalityEvent
@@ -91,6 +96,10 @@ sealed interface RobotAction {
     ) : RobotAction
 
     data class Backpack(val light: PersonalityLight) : RobotAction
+    data class CubeLight(
+        val cubeId: Long,
+        val light: PersonalityLight
+    ) : RobotAction
     data class PlayAnimation(val name: String) : RobotAction
     data class PlaySound(val cue: PersonalitySoundCue) : RobotAction
     data class Speak(val text: String) : RobotAction
