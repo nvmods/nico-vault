@@ -63,25 +63,63 @@ class CozmoCameraAssembler {
         if (raw.isEmpty()) return null
 
         return when (encoding) {
-            8 -> {
-                val size = resolutionSize(resolution)
-                val jpeg = MiniGrayJpeg.toJpeg(raw, size.first, size.second)
-                BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
-            }
+            8 -> decodeMiniJpeg(raw, resolution)
 
             5, 6, 7 -> {
                 val start = findJpegStart(raw)
-                if (start < 0) null
-                else BitmapFactory.decodeByteArray(raw, start, raw.size - start)
+                if (start < 0) {
+                    null
+                } else {
+                    BitmapFactory.decodeByteArray(raw, start, raw.size - start)
+                }
             }
 
             else -> null
         }
     }
 
+    private fun decodeMiniJpeg(raw: ByteArray, resolution: Int): Bitmap? {
+        val (fullWidth, height) = resolutionSize(resolution)
+
+        // Format Cozmo JPEGMinimizedGray :
+        // le premier octet indique si le flux est couleur.
+        // En couleur, la trame JPEG est encodée à demi-largeur.
+        val isColor = (raw[0].toInt() and 0xff) != 0
+
+        if (!isColor) {
+            val jpeg = MiniJpeg.toGrayJpeg(raw, fullWidth, height)
+            return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        }
+
+        val encodedWidth = fullWidth / 2
+        if (encodedWidth <= 0) return null
+
+        val jpeg = MiniJpeg.toColorJpeg(raw, encodedWidth, height)
+        val halfWidthBitmap =
+            BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return null
+
+        // Le SDK Cozmo encode la chrominance couleur en demi-largeur.
+        // Restaurer la géométrie nominale (ex. 320 x 240).
+        if (halfWidthBitmap.width == fullWidth) return halfWidthBitmap
+
+        return Bitmap.createScaledBitmap(
+            halfWidthBitmap,
+            fullWidth,
+            height,
+            true
+        ).also {
+            if (it !== halfWidthBitmap) {
+                halfWidthBitmap.recycle()
+            }
+        }
+    }
+
     private fun findJpegStart(data: ByteArray): Int {
         for (i in 0 until data.size - 1) {
-            if ((data[i].toInt() and 0xff) == 0xff && (data[i + 1].toInt() and 0xff) == 0xd8) {
+            if (
+                (data[i].toInt() and 0xff) == 0xff &&
+                (data[i + 1].toInt() and 0xff) == 0xd8
+            ) {
                 return i
             }
         }
@@ -106,27 +144,52 @@ class CozmoCameraAssembler {
     }
 }
 
-private object MiniGrayJpeg {
-    private val header = hex(
+private object MiniJpeg {
+    private val grayHeader = hex(
         "ffd8ffe000104a46494600010100000100010000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffc0000b080128019001011100ffc400d20000010501010101010100000000000000000102030405060708090a0b100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f00"
     )
 
-    fun toJpeg(mini: ByteArray, width: Int, height: Int): ByteArray {
-        val h = header.copyOf()
+    private val colorHeader = hex(
+        "ffd8ffe000104a46494600010100000100010000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffc000110800f0014003012100021100031100ffc400d20000010501010101010100000000000000000102030405060708090a0b100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda000c03010002000300003f00"
+    )
+
+    fun toGrayJpeg(mini: ByteArray, width: Int, height: Int): ByteArray =
+        toJpeg(mini, width, height, grayHeader)
+
+    fun toColorJpeg(mini: ByteArray, width: Int, height: Int): ByteArray =
+        toJpeg(mini, width, height, colorHeader)
+
+    private fun toJpeg(
+        mini: ByteArray,
+        width: Int,
+        height: Int,
+        template: ByteArray
+    ): ByteArray {
+        if (mini.isEmpty()) return ByteArray(0)
+
+        val h = template.copyOf()
         h[0x5e] = (height ushr 8).toByte()
         h[0x5f] = height.toByte()
         h[0x60] = (width ushr 8).toByte()
         h[0x61] = width.toByte()
 
         var end = mini.size
-        while (end > 1 && (mini[end - 1].toInt() and 0xff) == 0xff) end--
+        while (
+            end > 1 &&
+            (mini[end - 1].toInt() and 0xff) == 0xff
+        ) {
+            end--
+        }
 
         val out = ByteArrayOutputStream(h.size + end * 2 + 2)
         out.write(h)
 
+        // Le premier octet du mini-JPEG est le flag couleur, pas du JPEG.
         for (i in 1 until end) {
             val value = mini[i].toInt() and 0xff
             out.write(value)
+
+            // Byte stuffing JPEG.
             if (value == 0xff) out.write(0)
         }
 
@@ -136,5 +199,7 @@ private object MiniGrayJpeg {
     }
 
     private fun hex(value: String): ByteArray =
-        value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        value.chunked(2)
+            .map { it.toInt(16).toByte() }
+            .toByteArray()
 }
