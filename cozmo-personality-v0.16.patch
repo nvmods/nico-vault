@@ -1,0 +1,2512 @@
+From 142f643f15779b481c23fbef19c0010dfe8d1c4e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 16:22:01 +0000
+Subject: [PATCH] =?UTF-8?q?Personnalit=C3=A9=20v0.16=20:=20mod=C3=A8le=20d?=
+ =?UTF-8?q?'origine=20(=C3=A9motions,=20besoins,=20frustration,=20activit?=
+ =?UTF-8?q?=C3=A9s)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- MoodManager : émotions [-1,1] avec courbes de décroissance et pénalité de répétition d'origine
+- NeedsManager : Energy/Play/Repair, taux, tranches et cooldown de plénitude d'origine
+- PersonalityBrain : logique pure (réactions, frustration via Confident, activités freeplay)
+- PersonalityEngine : exécuteur autour du cerveau, API inchangée
+- Tuning intégré + chargement optionnel de cozmo_personality.json utilisateur
+- UI : jauges émotions/besoins, activité courante, boutons Nourrir/Réparer
+- Corrige l'arrêt de l'autonomie après quelques minutes (v0.15)
+- Tests : décroissances, besoins, frustration, activités, loader, régression 30 min
+---
+ cozmo-modern/README.md                        |  14 +
+ cozmo-modern/app/build.gradle.kts             |   4 +-
+ .../nvmods/cozmo/personality/MoodManager.kt   |  46 ++
+ .../nvmods/cozmo/personality/NeedsManager.kt  |  99 +++
+ .../cozmo/personality/PersonalityBrain.kt     | 575 +++++++++++++++++
+ .../cozmo/personality/PersonalityEngine.kt    | 590 +++---------------
+ .../cozmo/personality/PersonalityModels.kt    |  31 +-
+ .../cozmo/personality/PersonalityTuning.kt    | 215 +++++++
+ .../personality/PersonalityTuningLoader.kt    | 259 ++++++++
+ .../main/java/fr/nvmods/cozmo/ui/CozmoApp.kt  |  32 +-
+ .../java/fr/nvmods/cozmo/ui/CozmoViewModel.kt |  48 +-
+ .../cozmo/personality/PersonalityBrainTest.kt | 120 ++++
+ .../personality/PersonalityManagersTest.kt    | 110 ++++
+ .../PersonalityTuningLoaderTest.kt            |  86 +++
+ 14 files changed, 1705 insertions(+), 524 deletions(-)
+ create mode 100644 cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/MoodManager.kt
+ create mode 100644 cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/NeedsManager.kt
+ create mode 100644 cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityBrain.kt
+ create mode 100644 cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuning.kt
+ create mode 100644 cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuningLoader.kt
+ create mode 100644 cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityBrainTest.kt
+ create mode 100644 cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityManagersTest.kt
+ create mode 100644 cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityTuningLoaderTest.kt
+
+diff --git a/cozmo-modern/README.md b/cozmo-modern/README.md
+index 17026a6..eab774c 100644
+--- a/cozmo-modern/README.md
++++ b/cozmo-modern/README.md
+@@ -2,6 +2,20 @@
+ 
+ Réécriture moderne de l'application Cozmo pour Android actuel, sans dépendance d'exécution à l'ancien moteur natif.
+ 
++## V0.16 — Personnalité fidèle au moteur d'origine
++
++Le moteur de personnalité reprend désormais le modèle du Cozmo d'origine au lieu de jauges ad hoc :
++
++- **Émotions** (`MoodManager`) : Happy, Calm, Excited, Brave, Confident, Social, WantToPlay dans [-1, 1], retour vers 0 selon les courbes temporelles d'origine, pénalité de répétition par événement nommé (`CliffDetected`, `LookAtFaceVerified`, `MotionReact`…).
++- **Besoins** (`NeedsManager`) : Energy / Play / Repair avec les taux de décroissance, tranches (Full / Normal / Warning / Critical) et cooldown de plénitude (20 min) d'origine. Boutons *Nourrir* et *Réparer* en remplacement des mini-jeux.
++- **Frustration** : dérivée de Confident (mineure ≤ -0,6, majeure ≤ -0,9), déclenchée notamment par trop d'interruptions physiques rapprochées ; rebond de confiance quand la réaction se termine.
++- **Activités freeplay** (`PersonalityBrain`) : visage → Socialiser (si Social ≤ 0,3), cube → Jouer seul, rien → Explorer, avec durées et cooldowns d'origine ; besoins critiques → activités dédiées au rythme ralenti au lieu d'un arrêt.
++- Corrige le blocage de la v0.15 où l'autonomie s'éteignait après quelques minutes (énergie vidée par les ticks).
++
++### Tuning d'origine optionnel
++
++Les valeurs d'origine sont intégrées par défaut. Pour les recharger depuis ton propre APK : générer `cozmo_personality.json` avec `extract_cozmo_personality.py` sur `assets/cozmo_resources/config/engine/`, puis le copier dans `Android/data/fr.nvmods.cozmo/files/`. La source active est affichée dans l'onglet personnalité. Ce fichier n'est pas versionné.
++
+ ## V0.7 — CubeManager
+ 
+ La V0.7 garde les fonctions validées (mouvements, caméra, IR, backpack, voix) et remplace la gestion simplifiée des cubes par une vraie couche dédiée.
+diff --git a/cozmo-modern/app/build.gradle.kts b/cozmo-modern/app/build.gradle.kts
+index f1b6b46..ff8b141 100644
+--- a/cozmo-modern/app/build.gradle.kts
++++ b/cozmo-modern/app/build.gradle.kts
+@@ -12,8 +12,8 @@ android {
+         applicationId = "fr.nvmods.cozmo"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 27
+-        versionName = "0.15.0"
++        versionCode = 28
++        versionName = "0.16.0"
+ 
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/MoodManager.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/MoodManager.kt
+new file mode 100644
+index 0000000..8c224f6
+--- /dev/null
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/MoodManager.kt
+@@ -0,0 +1,46 @@
++package fr.nvmods.cozmo.personality
++
++/**
++ * Émotions façon Cozmo d'origine : chaque dimension vit dans [-1, 1] et
++ * revient vers 0 selon une courbe fonction du temps écoulé depuis son
++ * dernier changement. Un même événement répété trop vite est atténué
++ * (repetitionPenalty).
++ */
++class MoodManager(private val tuning: MoodTuning) {
++
++    private class Slot(var base: Float = 0f, var changedAtMs: Long = 0L)
++
++    private val slots = EmotionType.entries.associateWith { Slot() }
++    private val lastEventMs = mutableMapOf<String, Long>()
++
++    fun value(e: EmotionType, nowMs: Long): Float {
++        val s = slots.getValue(e)
++        if (s.base == 0f) return 0f
++        val elapsedSec = ((nowMs - s.changedAtMs).coerceAtLeast(0L)) / 1000f
++        return (s.base * tuning.decayFor(e).eval(elapsedSec)).coerceIn(-1f, 1f)
++    }
++
++    fun add(e: EmotionType, delta: Float, nowMs: Long) {
++        val s = slots.getValue(e)
++        s.base = (value(e, nowMs) + delta).coerceIn(-1f, 1f)
++        s.changedAtMs = nowMs
++    }
++
++    /**
++     * Applique un événement nommé (table emotionevents).
++     * @return le multiplicateur appliqué (0 si inconnu ou totalement pénalisé).
++     */
++    fun trigger(eventName: String, nowMs: Long): Float {
++        val affectors = tuning.events[eventName] ?: return 0f
++        val penalty = lastEventMs[eventName]
++            ?.let { tuning.repetitionPenalty.eval((nowMs - it) / 1000f) }
++            ?: 1f
++        lastEventMs[eventName] = nowMs
++        if (penalty <= 0f) return 0f
++        affectors.forEach { (e, v) -> add(e, v * penalty, nowMs) }
++        return penalty
++    }
++
++    fun snapshot(nowMs: Long): Map<EmotionType, Float> =
++        EmotionType.entries.associateWith { value(it, nowMs) }
++}
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/NeedsManager.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/NeedsManager.kt
+new file mode 100644
+index 0000000..d09e4a5
+--- /dev/null
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/NeedsManager.kt
+@@ -0,0 +1,99 @@
++package fr.nvmods.cozmo.personality
++
++import kotlin.math.max
++
++/**
++ * Besoins Energy / Play / Repair façon Cozmo d'origine.
++ *
++ * La décroissance est calculée sur le temps réel écoulé (pas par tick),
++ * par pas d'au plus une minute pour respecter les changements de taux
++ * aux seuils. Après être redevenu plein, un besoin ne décroît pas pendant
++ * fullnessCooldownSec.
++ */
++class NeedsManager(
++    private val tuning: NeedsTuning,
++    startMs: Long
++) {
++    private val levels = NeedId.entries
++        .associateWith { (tuning.initial[it] ?: 1f).coerceIn(tuning.minLevel, tuning.maxLevel) }
++        .toMutableMap()
++    private val fullSinceMs = mutableMapOf<NeedId, Long>()
++    private val lastActionMs = mutableMapOf<String, Long>()
++    private var lastUpdateMs = startMs
++
++    init {
++        NeedId.entries.forEach { if (bracket(it) == NeedBracket.Full) fullSinceMs[it] = startMs }
++    }
++
++    fun level(need: NeedId): Float = levels.getValue(need)
++
++    fun bracket(need: NeedId): NeedBracket {
++        val lvl = level(need)
++        val b = tuning.brackets[need].orEmpty()
++        return when {
++            lvl >= (b[NeedBracket.Full] ?: 0.99f) -> NeedBracket.Full
++            lvl >= (b[NeedBracket.Normal] ?: 0.5f) -> NeedBracket.Normal
++            lvl >= (b[NeedBracket.Warning] ?: 0.2f) -> NeedBracket.Warning
++            else -> NeedBracket.Critical
++        }
++    }
++
++    fun update(nowMs: Long) {
++        if (nowMs <= lastUpdateMs) return
++        val previous = lastUpdateMs
++        lastUpdateMs = nowMs
++
++        for (need in NeedId.entries) {
++            val cooldownMs = ((tuning.fullnessCooldownSec[need] ?: 0f) * 1000f).toLong()
++            val fullUntil = fullSinceMs[need]?.plus(cooldownMs) ?: Long.MIN_VALUE
++            val decayStart = max(previous, fullUntil)
++            if (nowMs <= decayStart) continue
++
++            var remainingMin = (nowMs - decayStart) / 60_000f
++            var lvl = levels.getValue(need)
++            while (remainingMin > 0f) {
++                val step = minOf(1f, remainingMin)
++                val rate = rateFor(need, lvl)
++                if (rate <= 0f) break
++                lvl = max(tuning.minLevel, lvl - rate * step)
++                remainingMin -= step
++                if (lvl <= tuning.minLevel) break
++            }
++            levels[need] = lvl
++            if (bracket(need) != NeedBracket.Full) fullSinceMs.remove(need)
++        }
++    }
++
++    /**
++     * Applique une action de la table needs_action_config.
++     * @return false si l'action est inconnue ou encore en cooldown.
++     */
++    fun apply(actionId: String, nowMs: Long): Boolean {
++        val d = tuning.actions[actionId] ?: return false
++        val last = lastActionMs[actionId]
++        if (last != null && nowMs - last < (d.cooldownSec * 1000f).toLong()) return false
++        lastActionMs[actionId] = nowMs
++        update(nowMs)
++        adjust(NeedId.Repair, d.repair, nowMs)
++        adjust(NeedId.Energy, d.energy, nowMs)
++        adjust(NeedId.Play, d.play, nowMs)
++        return true
++    }
++
++    private fun adjust(need: NeedId, delta: Float, nowMs: Long) {
++        if (delta == 0f) return
++        val wasFull = bracket(need) == NeedBracket.Full
++        levels[need] = (level(need) + delta).coerceIn(tuning.minLevel, tuning.maxLevel)
++        val isFull = bracket(need) == NeedBracket.Full
++        when {
++            isFull && (delta > 0f || !wasFull) -> fullSinceMs[need] = nowMs
++            !isFull -> fullSinceMs.remove(need)
++        }
++    }
++
++    private fun rateFor(need: NeedId, lvl: Float): Float =
++        tuning.connectedDecay[need].orEmpty()
++            .sortedByDescending { it.threshold }
++            .firstOrNull { lvl >= it.threshold }
++            ?.perMinute ?: 0f
++}
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityBrain.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityBrain.kt
+new file mode 100644
+index 0000000..4185f78
+--- /dev/null
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityBrain.kt
+@@ -0,0 +1,575 @@
++package fr.nvmods.cozmo.personality
++
++import kotlin.random.Random
++
++data class BrainDecision(
++    val label: String,
++    val actions: List<RobotAction>,
++    /** Événement émotionnel appliqué seulement si la séquence va au bout. */
++    val onCompleteEmotion: String? = null
++)
++
++private data class BehaviorOption(
++    val id: String,
++    val weight: Float,
++    val actions: List<RobotAction>,
++    val emotionEvent: String? = null,
++    val needsAction: String? = null
++)
++
++/**
++ * Logique de décision pure (pas de coroutines, horloge injectée) :
++ *  - perceptions -> événements émotionnels / actions de besoins d'origine ;
++ *  - réactions immédiates aux perceptions ;
++ *  - frustration dérivée de Confident (seuils ReactToFrustrationMinor/Major) ;
++ *  - choix d'activité freeplay (visage -> Socialize, cube -> PlayAlone,
++ *    rien -> Hiking) avec durées / cooldowns d'origine ;
++ *  - choix pondéré d'un comportement dans l'activité, avec pénalité de
++ *    répétition.
++ */
++class PersonalityBrain(
++    val tuning: PersonalityTuning,
++    startMs: Long,
++    private val random: Random = Random.Default
++) {
++    val mood = MoodManager(tuning.mood)
++    val needs = NeedsManager(tuning.needs, startMs)
++
++    var mode: PersonalityMode = PersonalityMode.NORMAL
++    var faceVisible = false
++        private set
++    var cubeVisible = false
++        private set
++    var pickedUp = false
++        private set
++    var activity: Activity = Activity.NothingToDo
++        private set
++
++    private var activityStartMs = startMs
++    private val activityCooldownUntil = mutableMapOf<Activity, Long>()
++    private val behaviorLastUseMs = mutableMapOf<String, Long>()
++    private var lastAutonomousMs = NEVER
++    private var lastCubeMotionMs = NEVER
++    private var lastMinorFrustrationMs = NEVER
++    private var lastMajorFrustrationMs = NEVER
++    private val disruptions = ArrayDeque<Long>()
++
++    fun onEvent(event: PersonalityEvent, nowMs: Long): BrainDecision? {
++        needs.update(nowMs)
++
++        if (event == PersonalityEvent.IdleTick) {
++            return frustrationReaction(nowMs) ?: idle(nowMs)
++        }
++
++        val reaction = react(event, nowMs)
++        val frustration = frustrationReaction(nowMs)
++
++        return when {
++            frustration == null -> reaction
++            reaction == null -> frustration
++            else -> BrainDecision(
++                label = reaction.label + " puis " + frustration.label.lowercase(),
++                actions = reaction.actions + frustration.actions,
++                onCompleteEmotion = frustration.onCompleteEmotion
++            )
++        }
++    }
++
++    fun onDecisionCompleted(decision: BrainDecision, nowMs: Long) {
++        decision.onCompleteEmotion?.let { mood.trigger(it, nowMs) }
++    }
++
++    // ------------------------------------------------------------------
++    // Réactions aux perceptions
++    // ------------------------------------------------------------------
++
++    private fun react(event: PersonalityEvent, now: Long): BrainDecision? = when (event) {
++        is PersonalityEvent.FaceDetected -> {
++            faceVisible = true
++            // Détection = AcknowledgeFace d'origine ; le gros gain Social
++            // vient ensuite des interactions pendant Socialize.
++            mood.trigger("LookAtFaceVerified", now)
++            needs.apply("SeeFace", now)
++            BrainDecision(
++                "Saluer la personne",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("greeting", PersonalitySoundCue.GREETING),
++                    RobotAction.Backpack(PersonalityLight.BLUE)
++                )
++            )
++        }
++
++        PersonalityEvent.FaceLost -> {
++            faceVisible = false
++            null
++        }
++
++        is PersonalityEvent.CubeDetected -> {
++            cubeVisible = true
++            mood.trigger("FoundObservedObject", now)
++            BrainDecision(
++                "S'intéresser au cube",
++                listOf(RobotAction.Express("cube_interest", PersonalitySoundCue.CURIOUS))
++            )
++        }
++
++        is PersonalityEvent.CubeTapped -> {
++            mood.trigger("CubeTapped", now)
++            needs.apply("CubePlay", now)
++            BrainDecision("Réagir au tap du cube", cubeTapActions(event.cubeId))
++        }
++
++        is PersonalityEvent.CubeMoved -> {
++            if (now - lastCubeMotionMs < CUBE_MOTION_COOLDOWN_MS) {
++                null
++            } else {
++                lastCubeMotionMs = now
++                mood.trigger("MotionReact", now)
++                BrainDecision("Suivre le mouvement du cube", cubeMovedActions())
++            }
++        }
++
++        PersonalityEvent.CubeLost -> {
++            cubeVisible = false
++            null
++        }
++
++        PersonalityEvent.PickedUp -> {
++            pickedUp = true
++            mood.trigger("ReactToUnexpectedMovement", now)
++            disruption(now)
++            BrainDecision(
++                "Réagir au soulèvement",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("picked_up", PersonalitySoundCue.PICKED_UP)
++                )
++            )
++        }
++
++        PersonalityEvent.PutDown -> {
++            pickedUp = false
++            BrainDecision(
++                "Réagir au retour au sol",
++                listOf(RobotAction.Express("put_down", PersonalitySoundCue.PUT_DOWN))
++            )
++        }
++
++        PersonalityEvent.OnBack -> {
++            disruption(now)
++            BrainDecision(
++                "Constater qu'il est sur le dos",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("on_back_notice", PersonalitySoundCue.SURPRISED)
++                )
++            )
++        }
++
++        PersonalityEvent.OnFace -> {
++            disruption(now)
++            BrainDecision(
++                "Constater qu'il est sur la face",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("on_face_notice", PersonalitySoundCue.SURPRISED)
++                )
++            )
++        }
++
++        PersonalityEvent.OnSide -> {
++            disruption(now)
++            needs.apply("PlacedOnSide", now)
++            BrainDecision(
++                "Constater qu'il est sur le côté",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("on_side_notice", PersonalitySoundCue.CURIOUS)
++                )
++            )
++        }
++
++        PersonalityEvent.Wheelie -> BrainDecision(
++            "Réagir au wheelie",
++            listOf(
++                RobotAction.Stop,
++                RobotAction.Express("wheelie_notice", PersonalitySoundCue.EFFORT)
++            )
++        )
++
++        PersonalityEvent.Falling -> {
++            needs.apply("Fall", now)
++            disruption(now)
++            BrainDecision(
++                "Réagir à la chute",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("fall_notice", PersonalitySoundCue.SURPRISED)
++                )
++            )
++        }
++
++        PersonalityEvent.CliffDetected -> {
++            mood.trigger("CliffDetected", now)
++            disruption(now)
++            BrainDecision(
++                "Sécuriser le bord",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.PlaySound(PersonalitySoundCue.CLIFF),
++                    RobotAction.Backpack(PersonalityLight.RED),
++                    RobotAction.PlayAnimation("cliff_notice")
++                )
++            )
++        }
++
++        PersonalityEvent.Touched -> {
++            mood.trigger("Petted", now)
++            BrainDecision(
++                "Réagir au contact",
++                listOf(RobotAction.Express("happy_small", PersonalitySoundCue.HAPPY_SHORT))
++            )
++        }
++
++        PersonalityEvent.UserInteraction -> {
++            mood.trigger("UserInteraction", now)
++            BrainDecision(
++                "Répondre à l'utilisateur",
++                if (mode == PersonalityMode.JOUEUR) {
++                    listOf(
++                        RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
++                        RobotAction.PlayAnimation("playful_invite"),
++                        RobotAction.Backpack(PersonalityLight.GREEN)
++                    )
++                } else {
++                    listOf(
++                        RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
++                        RobotAction.PlayAnimation("acknowledge")
++                    )
++                }
++            )
++        }
++
++        PersonalityEvent.BatteryLow -> {
++            needs.apply("BatteryLowSimulated", now)
++            BrainDecision(
++                "Passer en énergie basse",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Express("low_energy", PersonalitySoundCue.LOW_ENERGY)
++                )
++            )
++        }
++
++        is PersonalityEvent.NeedsAction -> {
++            if (!needs.apply(event.actionId, now)) {
++                null
++            } else if (event.actionId == "Feed") {
++                BrainDecision(
++                    "Manger",
++                    listOf(RobotAction.Express("happy_small", PersonalitySoundCue.HAPPY_LONG))
++                )
++            } else {
++                BrainDecision(
++                    event.label,
++                    listOf(RobotAction.Express("tiny_wiggle", PersonalitySoundCue.HAPPY_SHORT))
++                )
++            }
++        }
++
++        PersonalityEvent.IdleTick -> null
++    }
++
++    private fun cubeTapActions(cubeId: Long): List<RobotAction> = when (random.nextInt(4)) {
++        0 -> listOf(
++            RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
++            RobotAction.CubeLight(cubeId, PersonalityLight.GREEN),
++            RobotAction.MoveHead(-0.35f, 120),
++            RobotAction.Wait(100),
++            RobotAction.MoveHead(0.35f, 120),
++            RobotAction.CubeLight(cubeId, PersonalityLight.BLUE)
++        )
++
++        1 -> listOf(
++            RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
++            RobotAction.CubeLight(cubeId, PersonalityLight.GREEN),
++            RobotAction.PlayAnimation("small_bounce"),
++            RobotAction.CubeLight(cubeId, PersonalityLight.BLUE)
++        )
++
++        2 -> listOf(
++            RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
++            RobotAction.PlayAnimation("tiny_wiggle"),
++            RobotAction.CubeLight(cubeId, PersonalityLight.GREEN)
++        )
++
++        else -> listOf(
++            RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
++            RobotAction.PlayAnimation("cube_peek"),
++            RobotAction.CubeLight(cubeId, PersonalityLight.BLUE)
++        )
++    }
++
++    private fun cubeMovedActions(): List<RobotAction> = when (random.nextInt(3)) {
++        0 -> listOf(
++            RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
++            RobotAction.PlayAnimation("cube_peek")
++        )
++
++        1 -> listOf(RobotAction.PlayAnimation("curious_nod"))
++
++        else -> listOf(
++            RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
++            RobotAction.PlayAnimation("small_bounce")
++        )
++    }
++
++    // ------------------------------------------------------------------
++    // Frustration
++    // ------------------------------------------------------------------
++
++    /**
++     * Équivalent de TooManyResumesCliffOrMovement : trop d'interruptions
++     * physiques (falaise, chute, soulèvement, retournement) en peu de temps.
++     */
++    private fun disruption(now: Long) {
++        val f = tuning.frustration
++        val windowMs = (f.disruptionWindowSec * 1000f).toLong()
++        disruptions.addLast(now)
++        while (disruptions.isNotEmpty() && now - disruptions.first() > windowMs) {
++            disruptions.removeFirst()
++        }
++        if (disruptions.size >= f.disruptionCount) {
++            disruptions.clear()
++            mood.trigger("TooManyResumesCliffOrMovement", now)
++        }
++    }
++
++    private fun frustrationReaction(now: Long): BrainDecision? {
++        val f = tuning.frustration
++        val confident = mood.value(EmotionType.Confident, now)
++
++        if (confident <= f.majorMaxConfident && now - lastMajorFrustrationMs >= MAJOR_GUARD_MS) {
++            lastMajorFrustrationMs = now
++            return BrainDecision(
++                "Frustration majeure",
++                listOf(
++                    RobotAction.Stop,
++                    RobotAction.Backpack(PersonalityLight.RED),
++                    RobotAction.Express("on_face_notice", PersonalitySoundCue.ANGRY),
++                    RobotAction.Wait(400),
++                    RobotAction.Express("low_energy", PersonalitySoundCue.SAD),
++                    RobotAction.Backpack(PersonalityLight.OFF)
++                ),
++                onCompleteEmotion = "FinishedMajorFrustration"
++            )
++        }
++
++        val minorCooldownMs = (f.minorCooldownSec * 1000f).toLong()
++        if (
++            confident <= f.minorMaxConfident &&
++            confident > f.majorMaxConfident &&
++            now - lastMinorFrustrationMs >= minorCooldownMs
++        ) {
++            lastMinorFrustrationMs = now
++            return BrainDecision(
++                "Frustration mineure",
++                listOf(RobotAction.Express("on_face_notice", PersonalitySoundCue.ANGRY)),
++                onCompleteEmotion = "FinishedMinorFrustration"
++            )
++        }
++
++        return null
++    }
++
++    // ------------------------------------------------------------------
++    // Freeplay : activité puis comportement
++    // ------------------------------------------------------------------
++
++    private fun idle(now: Long): BrainDecision? {
++        if (pickedUp) return null
++
++        val current = chooseActivity(now)
++
++        val baseCooldown = when (mode) {
++            PersonalityMode.CALME -> 2_400L
++            PersonalityMode.NORMAL -> 900L
++            PersonalityMode.JOUEUR -> 520L
++        }
++        val cooldownMs = if (current.isSevere()) baseCooldown * 3 else baseCooldown
++        if (now - lastAutonomousMs < cooldownMs) return null
++
++        val chance = when (mode) {
++            PersonalityMode.CALME -> 0.62f
++            PersonalityMode.NORMAL -> 0.93f
++            PersonalityMode.JOUEUR -> 0.985f
++        }
++        if (random.nextFloat() > chance) return null
++
++        val option = pickBehavior(current, now) ?: return null
++        lastAutonomousMs = now
++        behaviorLastUseMs[option.id] = now
++        option.emotionEvent?.let { mood.trigger(it, now) }
++        option.needsAction?.let { needs.apply(it, now) }
++
++        return BrainDecision(current.label + " : " + option.id, option.actions)
++    }
++
++    private fun chooseActivity(now: Long): Activity {
++        severeActivity()?.let {
++            switchTo(it, now)
++            return it
++        }
++
++        val cur = activity
++        val elapsedSec = (now - activityStartMs) / 1000f
++        val timing = tuning.timing(cur)
++
++        fun ready(a: Activity) = now >= (activityCooldownUntil[a] ?: Long.MIN_VALUE)
++
++        val stillValid = when (cur) {
++            Activity.Socialize -> faceVisible
++            Activity.PlayAlone -> cubeVisible
++            Activity.Hiking -> true
++            else -> false
++        }
++        val expired = timing.shouldEndSec > 0f && elapsedSec >= timing.shouldEndSec
++
++        val candidates = listOf(
++            Activity.Socialize to (
++                faceVisible &&
++                    mood.value(EmotionType.Social, now) <= tuning.socializeMaxSocial
++                ),
++            Activity.PlayAlone to cubeVisible,
++            Activity.Hiking to true
++        )
++        val best = candidates.firstOrNull { (a, ok) -> ok && ready(a) }?.first
++            ?: Activity.NothingToDo
++
++        if (stillValid && !expired) {
++            // Une activité mieux placée peut préempter après un minimum
++            // de temps (activityCanEndDurationSecs d'origine : 5 s).
++            val preempt = best.rank() < cur.rank() && elapsedSec >= CAN_END_SEC
++            if (!preempt) return cur
++        } else if (cur.rank() in 0..2) {
++            activityCooldownUntil[cur] = now + (timing.cooldownSec * 1000f).toLong()
++        }
++
++        val next = if (!stillValid || expired) {
++            candidates.firstOrNull { (a, ok) -> ok && ready(a) }?.first ?: Activity.NothingToDo
++        } else {
++            best
++        }
++        switchTo(next, now)
++        return next
++    }
++
++    private fun severeActivity(): Activity? = when {
++        needs.bracket(NeedId.Repair) == NeedBracket.Critical -> Activity.NeedsSevereLowRepair
++        needs.bracket(NeedId.Energy) == NeedBracket.Critical -> Activity.NeedsSevereLowEnergy
++        needs.bracket(NeedId.Play) == NeedBracket.Critical -> Activity.NeedsSevereLowPlay
++        else -> null
++    }
++
++    private fun switchTo(a: Activity, now: Long) {
++        if (a != activity) {
++            activity = a
++            activityStartMs = now
++        }
++    }
++
++    private fun Activity.isSevere() = name.startsWith("NeedsSevere")
++
++    private fun Activity.rank(): Int = when (this) {
++        Activity.Socialize -> 0
++        Activity.PlayAlone -> 1
++        Activity.Hiking -> 2
++        Activity.NothingToDo -> 3
++        else -> -1
++    }
++
++    private fun pickBehavior(a: Activity, now: Long): BehaviorOption? {
++        val pool = pools.getValue(a)
++        val weighted = pool.map { opt ->
++            val last = behaviorLastUseMs[opt.id]
++            val penalty = if (last == null) 1f else BEHAVIOR_REPETITION.eval((now - last) / 1000f)
++            opt to opt.weight * penalty
++        }.filter { it.second > 0f }
++        val total = weighted.sumOf { it.second.toDouble() }.toFloat()
++        if (total <= 0f) return null
++        var r = random.nextFloat() * total
++        for ((opt, w) in weighted) {
++            r -= w
++            if (r <= 0f) return opt
++        }
++        return weighted.last().first
++    }
++
++    private val pools: Map<Activity, List<BehaviorOption>> = run {
++        fun express(name: String, cue: PersonalitySoundCue? = null) =
++            listOf(RobotAction.Express(name, cue))
++
++        fun anim(name: String) = listOf(RobotAction.PlayAnimation(name))
++
++        val social = "LookAtFaceVerified"
++        val interact = "InteractWithUnnamedFace"
++        val alone = "PlayAloneBehavior"
++
++        mapOf(
++            Activity.Socialize to listOf(
++                BehaviorOption("regarder", 1f, express("look_around", PersonalitySoundCue.CURIOUS), social),
++                BehaviorOption("acquiescer", 1f, anim("acknowledge"), social),
++                BehaviorOption("hocher", 1f, anim("curious_nod"), social),
++                BehaviorOption("content", 0.8f, express("happy_small", PersonalitySoundCue.HAPPY_SHORT), social),
++                BehaviorOption("inviter", 0.6f, express("playful_invite", PersonalitySoundCue.PLAYFUL), interact),
++                BehaviorOption("saluer", 0.3f, express("greeting", PersonalitySoundCue.GREETING), interact)
++            ),
++            Activity.PlayAlone to listOf(
++                BehaviorOption("fixer le cube", 1f, express("cube_interest", PersonalitySoundCue.CURIOUS), needsAction = alone),
++                BehaviorOption("épier le cube", 1f, express("cube_peek"), needsAction = alone),
++                BehaviorOption("sautiller", 0.8f, express("small_bounce", PersonalitySoundCue.HAPPY_SHORT), needsAction = alone),
++                BehaviorOption("foncer voir", 0.8f, express("dash_peek"), needsAction = alone),
++                BehaviorOption("dodeliner", 0.8f, express("quick_bob"), needsAction = alone),
++                BehaviorOption("trépigner", 0.5f, express("excited_shuffle", PersonalitySoundCue.PLAYFUL), needsAction = alone)
++            ),
++            Activity.Hiking to listOf(
++                BehaviorOption("se balader", 1.25f, express("wander_short")),
++                BehaviorOption("regarder autour", 1.1f, express("look_around", PersonalitySoundCue.CURIOUS)),
++                BehaviorOption("scanner", 1f, express("micro_scan")),
++                BehaviorOption("lever la tête", 1f, express("head_peek")),
++                BehaviorOption("foncer voir", 0.8f, express("dash_peek")),
++                BehaviorOption("hocher", 0.6f, anim("curious_nod"))
++            ),
++            Activity.NothingToDo to listOf(
++                BehaviorOption("cligner", 1f, anim("idle_blink")),
++                BehaviorOption("double clignement", 1f, anim("double_blink")),
++                BehaviorOption("s'ennuyer", 0.5f, express("body_bob", PersonalitySoundCue.BORED))
++            ),
++            Activity.NeedsSevereLowEnergy to listOf(
++                BehaviorOption("fatigué", 1f, express("low_energy", PersonalitySoundCue.LOW_ENERGY)),
++                BehaviorOption("somnoler", 1f, anim("idle_blink"))
++            ),
++            Activity.NeedsSevereLowRepair to listOf(
++                BehaviorOption("grincer", 1f, express("low_energy", PersonalitySoundCue.SAD)),
++                BehaviorOption("forcer", 0.5f, express("tiny_wiggle", PersonalitySoundCue.EFFORT)),
++                BehaviorOption("cligner", 1f, anim("idle_blink"))
++            ),
++            Activity.NeedsSevereLowPlay to listOf(
++                BehaviorOption("réclamer", 1f, express("playful_invite", PersonalitySoundCue.PLAYFUL)),
++                BehaviorOption("bouder", 1f, express("body_bob", PersonalitySoundCue.BORED)),
++                BehaviorOption("cligner", 0.5f, anim("idle_blink"))
++            )
++        )
++    }
++
++    companion object {
++        private const val NEVER = Long.MIN_VALUE / 2
++        private const val CUBE_MOTION_COOLDOWN_MS = 1_800L
++        private const val MAJOR_GUARD_MS = 10_000L
++        private const val CAN_END_SEC = 5f
++
++        /** Pénalité de répétition par comportement (CUSTOM, courte). */
++        private val BEHAVIOR_REPETITION = Curve.of(0 to 0.05, 20 to 1)
++    }
++}
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityEngine.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityEngine.kt
+index 5bd0e54..2de5a56 100644
+--- a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityEngine.kt
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityEngine.kt
+@@ -5,32 +5,31 @@ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.withTimeoutOrNull
+-import kotlin.math.max
+ import kotlin.random.Random
+ 
+ /**
+  * Moteur de personnalité indépendant du protocole Cozmo.
+  *
+- * Il reçoit des perceptions, met à jour l'état interne puis produit
+- * des intentions sous forme de RobotAction. Le transport réel sera
+- * branché plus tard derrière RobotActions.
++ * La décision est déléguée à PersonalityBrain (logique pure, testable) ;
++ * ce moteur exécute les séquences sur le robot, gère timeouts / pannes et
++ * publie l'état pour l'UI.
+  */
+ class PersonalityEngine(
+     private val robot: RobotActions,
+     private val clockMs: () -> Long = System::currentTimeMillis,
+-    private val random: Random = Random.Default
++    random: Random = Random.Default,
++    tuning: PersonalityTuning = PersonalityTuning.DEFAULT
+ ) {
+-    private val _state = MutableStateFlow(PersonalityState())
++    private val brain = PersonalityBrain(tuning, clockMs(), random)
++
++    private val _state = MutableStateFlow(PersonalityState(tuningSource = tuning.source))
+     val state: StateFlow<PersonalityState> = _state.asStateFlow()
+ 
+     private val _log = MutableStateFlow<List<PersonalityLogEntry>>(emptyList())
+     val log: StateFlow<List<PersonalityLogEntry>> = _log.asStateFlow()
+ 
+-    private var lastAutonomousDecisionMs = 0L
+-    private var lastCubeMotionReactionMs = 0L
+-
+     fun start() {
+-        _state.value = _state.value.copy(
++        publish(
+             enabled = true,
+             lastStimulus = "Moteur démarré",
+             lastDecision = "Observation"
+@@ -38,7 +37,7 @@ class PersonalityEngine(
+     }
+ 
+     fun stop() {
+-        _state.value = _state.value.copy(
++        publish(
+             enabled = false,
+             lastStimulus = "Moteur arrêté",
+             lastDecision = "Aucune action"
+@@ -46,11 +45,12 @@ class PersonalityEngine(
+     }
+ 
+     fun setMode(mode: PersonalityMode) {
+-        _state.value = _state.value.copy(mode = mode)
++        brain.mode = mode
++        publish()
+     }
+ 
+     fun reportRecoveredFault(message: String) {
+-        _state.value = _state.value.copy(
++        publish(
+             recoveredFaults = _state.value.recoveredFaults + 1,
+             lastFault = message.take(180),
+             lastDecision = "Erreur interceptée, moteur conservé actif"
+@@ -61,24 +61,30 @@ class PersonalityEngine(
+         if (!_state.value.enabled && event != PersonalityEvent.BatteryLow) return
+ 
+         val now = clockMs()
+-        val before = _state.value
+-        var next = evolve(before, event)
+-        val actions = decide(next, event, now)
+-
+-        if (actions.isEmpty()) {
+-            // Un stimulus ignoré (anti-spam cube, tick sans décision...) ne doit
+-            // pas remplacer la dernière vraie action par "Observer".
+-            _state.value = next.copy(lastDecision = before.lastDecision)
+-            return
++        val decision = brain.onEvent(event, now)
++
++        val isInteraction = when (event) {
++            is PersonalityEvent.FaceDetected,
++            is PersonalityEvent.CubeTapped,
++            PersonalityEvent.Touched,
++            PersonalityEvent.UserInteraction -> true
++            else -> false
+         }
++        val previous = _state.value
++        publish(
++            lastStimulus = describeEvent(event),
++            lastDecision = decision?.label ?: previous.lastDecision,
++            interactions = previous.interactions + if (isInteraction) 1 else 0,
++            idleTicks = previous.idleTicks + if (event == PersonalityEvent.IdleTick) 1 else 0
++        )
+ 
+-        val decision = describeDecision(event, actions)
+-        next = next.copy(lastDecision = decision)
+-        _state.value = next
++        // Un stimulus ignoré (anti-spam, tick sans décision...) ne remplace
++        // pas la dernière vraie décision.
++        if (decision == null || decision.actions.isEmpty()) return
+ 
+         val executed = mutableListOf<RobotAction>()
+ 
+-        for (action in actions) {
++        for (action in decision.actions) {
+             val result =
+                 try {
+                     withTimeoutOrNull(ACTION_TIMEOUT_MS) {
+@@ -104,23 +110,20 @@ class PersonalityEngine(
+                 result.status == ActionStatus.FAILED ||
+                 result.status == ActionStatus.TIMEOUT
+             ) {
+-                recoverFromActionFault(
+-                    action = action,
+-                    result = result,
+-                    event = event,
+-                    now = now,
+-                    executed = executed
+-                )
++                recoverFromActionFault(action, result, event, now, executed)
+                 return
+             }
+         }
+ 
++        brain.onDecisionCompleted(decision, clockMs())
++        publish()
++
+         appendLog(
+             PersonalityLogEntry(
+                 timestampMs = now,
+                 event = describeEvent(event),
+-                decision = decision,
+-                actions = actions
++                decision = decision.label,
++                actions = decision.actions
+             )
+         )
+     }
+@@ -132,16 +135,11 @@ class PersonalityEngine(
+         now: Long,
+         executed: List<RobotAction>
+     ) {
+-        val detail =
+-            (result.message ?: result.status.name)
+-                .take(160)
++        val detail = (result.message ?: result.status.name).take(160)
+ 
+-        _state.value = _state.value.copy(
++        publish(
+             recoveredFaults = _state.value.recoveredFaults + 1,
+-            lastFault =
+-                (action::class.simpleName ?: "Action") +
+-                    " : " +
+-                    detail,
++            lastFault = (action::class.simpleName ?: "Action") + " : " + detail,
+             lastDecision = "Séquence sécurisée après erreur"
+         )
+ 
+@@ -163,483 +161,50 @@ class PersonalityEngine(
+         )
+     }
+ 
+-    private fun evolve(
+-        current: PersonalityState,
+-        event: PersonalityEvent
+-    ): PersonalityState {
+-        return when (event) {
+-            is PersonalityEvent.FaceDetected -> current.copy(
+-                happiness = (current.happiness + 0.10f).unit(),
+-                curiosity = (current.curiosity + 0.08f).unit(),
+-                confidence = (current.confidence + 0.04f).unit(),
+-                knownFaceVisible = true,
+-                interactions = current.interactions + 1,
+-                lastStimulus = event.name?.let { "Visage : $it" } ?: "Visage détecté"
+-            )
+-
+-            PersonalityEvent.FaceLost -> current.copy(
+-                knownFaceVisible = false,
+-                lastStimulus = "Visage perdu"
+-            )
+-
+-            is PersonalityEvent.CubeDetected -> current.copy(
+-                curiosity = (current.curiosity + 0.14f).unit(),
+-                cubeVisible = true,
+-                lastStimulus = event.cubeId?.let { "Cube $it détecté" } ?: "Cube détecté"
+-            )
+-
+-            is PersonalityEvent.CubeTapped -> current.copy(
+-                happiness = (current.happiness + 0.08f).unit(),
+-                curiosity = (current.curiosity + 0.05f).unit(),
+-                interactions = current.interactions + 1,
+-                lastStimulus = "Cube ${event.cubeId} tapé"
+-            )
+-
+-            is PersonalityEvent.CubeMoved -> current.copy(
+-                curiosity = (current.curiosity + 0.06f).unit(),
+-                lastStimulus = "Cube ${event.cubeId} déplacé"
+-            )
+-
+-            PersonalityEvent.CubeLost -> current.copy(
+-                cubeVisible = false,
+-                curiosity = (current.curiosity + 0.05f).unit(),
+-                lastStimulus = "Cube perdu"
+-            )
+-
+-            PersonalityEvent.PickedUp -> current.copy(
+-                pickedUp = true,
+-                energy = (current.energy + 0.05f).unit(),
+-                frustration = (current.frustration + 0.08f).unit(),
+-                lastStimulus = "Cozmo soulevé"
+-            )
+-
+-            PersonalityEvent.PutDown -> current.copy(
+-                pickedUp = false,
+-                frustration = (current.frustration - 0.04f).unit(),
+-                lastStimulus = "Cozmo reposé"
+-            )
+-
+-            PersonalityEvent.OnBack -> current.copy(
+-                frustration = (current.frustration + 0.10f).unit(),
+-                curiosity = (current.curiosity + 0.03f).unit(),
+-                lastStimulus = "Sur le dos"
+-            )
+-
+-            PersonalityEvent.OnFace -> current.copy(
+-                frustration = (current.frustration + 0.12f).unit(),
+-                lastStimulus = "Sur la face"
+-            )
+-
+-            PersonalityEvent.OnSide -> current.copy(
+-                frustration = (current.frustration + 0.06f).unit(),
+-                lastStimulus = "Sur le côté"
+-            )
+-
+-            PersonalityEvent.Wheelie -> current.copy(
+-                curiosity = (current.curiosity + 0.08f).unit(),
+-                happiness = (current.happiness + 0.03f).unit(),
+-                lastStimulus = "En wheelie"
+-            )
+-
+-            PersonalityEvent.Falling -> current.copy(
+-                confidence = (current.confidence - 0.08f).unit(),
+-                frustration = (current.frustration + 0.10f).unit(),
+-                lastStimulus = "Chute détectée"
+-            )
+-
+-            PersonalityEvent.CliffDetected -> current.copy(
+-                confidence = (current.confidence - 0.06f).unit(),
+-                frustration = (current.frustration + 0.08f).unit(),
+-                lastStimulus = "Bord détecté"
+-            )
+-
+-            PersonalityEvent.Touched -> current.copy(
+-                happiness = (current.happiness + 0.08f).unit(),
+-                confidence = (current.confidence + 0.03f).unit(),
+-                interactions = current.interactions + 1,
+-                lastStimulus = "Contact"
+-            )
+-
+-            PersonalityEvent.UserInteraction -> current.copy(
+-                happiness = (current.happiness + 0.06f).unit(),
+-                curiosity = (current.curiosity + 0.04f).unit(),
+-                interactions = current.interactions + 1,
+-                lastStimulus = "Interaction utilisateur"
+-            )
+-
+-            PersonalityEvent.BatteryLow -> current.copy(
+-                energy = max(0.08f, current.energy - 0.25f),
+-                lastStimulus = "Batterie faible"
+-            )
+-
+-            PersonalityEvent.IdleTick -> {
+-                val modeCuriosity = when (current.mode) {
+-                    PersonalityMode.CALME -> 0.004f
+-                    PersonalityMode.NORMAL -> 0.010f
+-                    PersonalityMode.JOUEUR -> 0.018f
+-                }
+-
+-                current.copy(
+-                    curiosity = (current.curiosity + modeCuriosity).unit(),
+-                    happiness = (current.happiness - 0.002f).unit(),
+-                    energy = (current.energy - 0.0015f).unit(),
+-                    idleTicks = current.idleTicks + 1,
+-                    lastStimulus = "Temps libre"
+-                )
+-            }
+-        }
+-    }
+-
+-    private fun decide(
+-        state: PersonalityState,
+-        event: PersonalityEvent,
+-        now: Long
+-    ): List<RobotAction> {
+-        return when (event) {
+-            is PersonalityEvent.FaceDetected -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "greeting",
+-                    PersonalitySoundCue.GREETING
+-                ),
+-                RobotAction.Backpack(PersonalityLight.BLUE)
+-            )
+-
+-            PersonalityEvent.FaceLost -> emptyList()
+-
+-            is PersonalityEvent.CubeDetected -> listOf(
+-                RobotAction.Express(
+-                    "cube_interest",
+-                    PersonalitySoundCue.CURIOUS
+-                )
+-            )
+-
+-            is PersonalityEvent.CubeTapped -> when (random.nextInt(4)) {
+-                0 -> listOf(
+-                    RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+-                    RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN),
+-                    RobotAction.MoveHead(-0.35f, 120),
+-                    RobotAction.Wait(100),
+-                    RobotAction.MoveHead(0.35f, 120),
+-                    RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+-                )
+-
+-                1 -> listOf(
+-                    RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+-                    RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN),
+-                    RobotAction.PlayAnimation("small_bounce"),
+-                    RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+-                )
+-
+-                2 -> listOf(
+-                    RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
+-                    RobotAction.PlayAnimation("tiny_wiggle"),
+-                    RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN)
+-                )
+-
+-                else -> listOf(
+-                    RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+-                    RobotAction.PlayAnimation("cube_peek"),
+-                    RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+-                )
+-            }
+-
+-            is PersonalityEvent.CubeMoved -> {
+-                if (now - lastCubeMotionReactionMs < 1_800L) {
+-                    emptyList()
+-                } else {
+-                    lastCubeMotionReactionMs = now
+-                    when (random.nextInt(3)) {
+-                        0 -> listOf(
+-                            RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+-                            RobotAction.PlayAnimation("cube_peek")
+-                        )
+-
+-                        1 -> listOf(
+-                            RobotAction.PlayAnimation("curious_nod")
+-                        )
+-
+-                        else -> listOf(
+-                            RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+-                            RobotAction.PlayAnimation("small_bounce")
+-                        )
+-                    }
+-                }
+-            }
+-
+-            PersonalityEvent.PickedUp -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "picked_up",
+-                    PersonalitySoundCue.PICKED_UP
+-                )
+-            )
+-
+-            PersonalityEvent.PutDown -> listOf(
+-                RobotAction.Express(
+-                    "put_down",
+-                    PersonalitySoundCue.PUT_DOWN
+-                )
+-            )
+-
+-            PersonalityEvent.OnBack -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "on_back_notice",
+-                    PersonalitySoundCue.SURPRISED
+-                )
+-            )
+-
+-            PersonalityEvent.OnFace -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "on_face_notice",
+-                    PersonalitySoundCue.SURPRISED
+-                )
+-            )
+-
+-            PersonalityEvent.OnSide -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "on_side_notice",
+-                    PersonalitySoundCue.CURIOUS
+-                )
+-            )
+-
+-            PersonalityEvent.Wheelie -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "wheelie_notice",
+-                    PersonalitySoundCue.EFFORT
+-                )
+-            )
+-
+-            PersonalityEvent.Falling -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "fall_notice",
+-                    PersonalitySoundCue.SURPRISED
+-                )
+-            )
+-
+-            PersonalityEvent.CliffDetected -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.PlaySound(PersonalitySoundCue.CLIFF),
+-                RobotAction.Backpack(PersonalityLight.RED),
+-                RobotAction.PlayAnimation("cliff_notice")
+-            )
+-
+-            PersonalityEvent.Touched -> listOf(
+-                RobotAction.Express(
+-                    "happy_small",
+-                    PersonalitySoundCue.HAPPY_SHORT
+-                )
+-            )
+-
+-            PersonalityEvent.UserInteraction -> {
+-                if (state.mode == PersonalityMode.JOUEUR) {
+-                    listOf(
+-                        RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
+-                        RobotAction.PlayAnimation("playful_invite"),
+-                        RobotAction.Backpack(PersonalityLight.GREEN)
+-                    )
+-                } else {
+-                    listOf(
+-                        RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+-                        RobotAction.PlayAnimation("acknowledge")
+-                    )
+-                }
+-            }
+-
+-            PersonalityEvent.BatteryLow -> listOf(
+-                RobotAction.Stop,
+-                RobotAction.Express(
+-                    "low_energy",
+-                    PersonalitySoundCue.LOW_ENERGY
+-                )
+-            )
+-
+-            PersonalityEvent.CubeLost -> emptyList()
+-
+-            PersonalityEvent.IdleTick -> idleDecision(state, now)
+-        }
+-    }
+-
+-    private fun idleDecision(
+-        state: PersonalityState,
+-        now: Long
+-    ): List<RobotAction> {
+-        if (state.pickedUp || state.energy < 0.18f) return emptyList()
+-
+-        // Le Cozmo original enchaîne beaucoup de micro-réactions. Les gestes
+-        // restent courts pour préserver le transport, mais le rythme est
+-        // volontairement nettement plus élevé qu'en 0.14.
+-        val cooldownMs = when (state.mode) {
+-            PersonalityMode.CALME -> 2_400L
+-            PersonalityMode.NORMAL -> 900L
+-            PersonalityMode.JOUEUR -> 520L
+-        }
+-
+-        if (now - lastAutonomousDecisionMs < cooldownMs) return emptyList()
+-
+-        val chance = when (state.mode) {
+-            PersonalityMode.CALME -> 0.62f
+-            PersonalityMode.NORMAL -> 0.93f
+-            PersonalityMode.JOUEUR -> 0.985f
+-        }
+-
+-        if (state.curiosity < 0.18f || random.nextFloat() > chance) {
+-            return emptyList()
+-        }
+-
+-        lastAutonomousDecisionMs = now
+-
+-        if (state.cubeVisible) {
+-            return when (random.nextInt(6)) {
+-                0 -> listOf(RobotAction.Express("cube_interest"))
+-                1 -> listOf(
+-                    RobotAction.Express(
+-                        "cube_peek",
+-                        PersonalitySoundCue.CURIOUS
+-                    )
+-                )
+-                2 -> listOf(RobotAction.Express("micro_scan"))
+-                3 -> listOf(RobotAction.Express("quick_bob"))
+-                4 -> listOf(
+-                    RobotAction.Express(
+-                        "small_bounce",
+-                        PersonalitySoundCue.HAPPY_SHORT
+-                    )
+-                )
+-                else -> listOf(RobotAction.Express("dash_peek"))
+-            }
+-        }
+-
+-        return when (state.mode) {
+-            PersonalityMode.CALME ->
+-                when (random.nextInt(5)) {
+-                    0 -> listOf(RobotAction.PlayAnimation("idle_blink"))
+-                    1 -> listOf(RobotAction.PlayAnimation("curious_nod"))
+-                    2 -> listOf(RobotAction.Express("micro_scan"))
+-                    3 -> listOf(RobotAction.Express("head_peek"))
+-                    else -> listOf(
+-                        RobotAction.Express(
+-                            "small_bounce",
+-                            PersonalitySoundCue.CURIOUS
+-                        )
+-                    )
+-                }
++    /** Recalcule les jauges depuis le cerveau et fusionne les champs donnés. */
++    private fun publish(
++        enabled: Boolean = _state.value.enabled,
++        lastStimulus: String = _state.value.lastStimulus,
++        lastDecision: String = _state.value.lastDecision,
++        interactions: Long = _state.value.interactions,
++        idleTicks: Long = _state.value.idleTicks,
++        recoveredFaults: Long = _state.value.recoveredFaults,
++        lastFault: String? = _state.value.lastFault
++    ) {
++        val now = clockMs()
++        brain.needs.update(now)
++        val emotions = brain.mood.snapshot(now)
+ 
+-            PersonalityMode.NORMAL ->
+-                when (random.nextInt(12)) {
+-                    0 -> listOf(RobotAction.PlayAnimation("idle_blink"))
+-                    1 -> listOf(RobotAction.Express("micro_scan"))
+-                    2 -> listOf(RobotAction.Express("quick_bob"))
+-                    3 -> listOf(RobotAction.Express("head_peek"))
+-                    4 -> listOf(RobotAction.Express("tiny_wiggle"))
+-                    5 -> listOf(RobotAction.Express("dash_peek"))
+-                    6 -> listOf(RobotAction.Express("curious_nod"))
+-                    7 -> listOf(RobotAction.Express("wander_short"))
+-                    8 -> listOf(
+-                        RobotAction.Express(
+-                            "body_bob",
+-                            PersonalitySoundCue.HAPPY_SHORT
+-                        )
+-                    )
+-                    9 -> listOf(
+-                        RobotAction.Express(
+-                            "look_around",
+-                            PersonalitySoundCue.CURIOUS
+-                        )
+-                    )
+-                    10 -> listOf(RobotAction.PlayAnimation("double_blink"))
+-                    else -> listOf(
+-                        RobotAction.Express(
+-                            "happy_small",
+-                            PersonalitySoundCue.PLAYFUL
+-                        )
+-                    )
+-                }
++        fun unit(e: EmotionType) = ((emotions.getValue(e) + 1f) / 2f).coerceIn(0f, 1f)
+ 
+-            PersonalityMode.JOUEUR ->
+-                when (random.nextInt(14)) {
+-                    0 -> listOf(RobotAction.Express("micro_scan"))
+-                    1 -> listOf(RobotAction.Express("quick_bob"))
+-                    2 -> listOf(RobotAction.Express("dash_peek"))
+-                    3 -> listOf(RobotAction.Express("tiny_wiggle"))
+-                    4 -> listOf(RobotAction.Express("wander_short"))
+-                    5 -> listOf(RobotAction.Express("curious_nod"))
+-                    6 -> listOf(
+-                        RobotAction.Express(
+-                            "excited_shuffle",
+-                            PersonalitySoundCue.PLAYFUL
+-                        )
+-                    )
+-                    7 -> listOf(
+-                        RobotAction.Express(
+-                            "small_bounce",
+-                            PersonalitySoundCue.HAPPY_SHORT
+-                        )
+-                    )
+-                    8 -> listOf(
+-                        RobotAction.Express(
+-                            "playful_invite",
+-                            PersonalitySoundCue.PLAYFUL
+-                        )
+-                    )
+-                    9 -> listOf(RobotAction.Express("head_peek"))
+-                    10 -> listOf(RobotAction.PlayAnimation("double_blink"))
+-                    11 -> listOf(
+-                        RobotAction.Express(
+-                            "body_bob",
+-                            PersonalitySoundCue.CURIOUS
+-                        )
+-                    )
+-                    12 -> listOf(
+-                        RobotAction.Express(
+-                            "happy_small",
+-                            PersonalitySoundCue.HAPPY_LONG
+-                        )
+-                    )
+-                    else -> listOf(
+-                        RobotAction.Express(
+-                            "look_around",
+-                            PersonalitySoundCue.CURIOUS
+-                        )
+-                    )
+-                }
+-        }
++        _state.value = _state.value.copy(
++            enabled = enabled,
++            mode = brain.mode,
++            happiness = unit(EmotionType.Happy),
++            curiosity = unit(EmotionType.Excited),
++            energy = brain.needs.level(NeedId.Energy),
++            frustration = (-emotions.getValue(EmotionType.Confident)).coerceIn(0f, 1f),
++            confidence = unit(EmotionType.Confident),
++            play = brain.needs.level(NeedId.Play),
++            repair = brain.needs.level(NeedId.Repair),
++            emotions = emotions,
++            activity = brain.activity.label,
++            pickedUp = brain.pickedUp,
++            knownFaceVisible = brain.faceVisible,
++            cubeVisible = brain.cubeVisible,
++            interactions = interactions,
++            idleTicks = idleTicks,
++            lastStimulus = lastStimulus,
++            lastDecision = lastDecision,
++            recoveredFaults = recoveredFaults,
++            lastFault = lastFault
++        )
+     }
+ 
+     private fun appendLog(entry: PersonalityLogEntry) {
+         _log.value = (listOf(entry) + _log.value).take(MAX_LOG_ENTRIES)
+     }
+ 
+-    private fun describeDecision(
+-        event: PersonalityEvent,
+-        actions: List<RobotAction>
+-    ): String = when (event) {
+-        is PersonalityEvent.FaceDetected -> "Saluer la personne"
+-        PersonalityEvent.FaceLost -> "Continuer son activité"
+-        is PersonalityEvent.CubeDetected -> "S'intéresser au cube"
+-        is PersonalityEvent.CubeTapped -> "Réagir au tap du cube"
+-        is PersonalityEvent.CubeMoved -> "Suivre le mouvement du cube"
+-        PersonalityEvent.PickedUp -> "Réagir au soulèvement"
+-        PersonalityEvent.PutDown -> "Réagir au retour au sol"
+-        PersonalityEvent.OnBack -> "Constater qu'il est sur le dos"
+-        PersonalityEvent.OnFace -> "Constater qu'il est sur la face"
+-        PersonalityEvent.OnSide -> "Constater qu'il est sur le côté"
+-        PersonalityEvent.Wheelie -> "Réagir au wheelie"
+-        PersonalityEvent.Falling -> "Réagir à la chute"
+-        PersonalityEvent.CliffDetected -> "Sécuriser le bord"
+-        PersonalityEvent.Touched -> "Réagir au contact"
+-        PersonalityEvent.UserInteraction -> "Répondre à l'utilisateur"
+-        PersonalityEvent.BatteryLow -> "Passer en énergie basse"
+-        PersonalityEvent.CubeLost -> "Chercher le cube"
+-        PersonalityEvent.IdleTick ->
+-            if (actions.isEmpty()) "Repos tranquille" else "Faire sa vie"
+-    }
+-
+     private fun describeEvent(event: PersonalityEvent): String = when (event) {
+         is PersonalityEvent.FaceDetected ->
+             event.name?.let { "Visage détecté : $it" } ?: "Visage détecté"
+@@ -668,6 +233,7 @@ class PersonalityEngine(
+         PersonalityEvent.UserInteraction -> "Interaction"
+         PersonalityEvent.BatteryLow -> "Batterie faible"
+         PersonalityEvent.IdleTick -> "Tick d'autonomie"
++        is PersonalityEvent.NeedsAction -> "Besoin : ${event.label}"
+     }
+ 
+     companion object {
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityModels.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityModels.kt
+index c707652..b032779 100644
+--- a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityModels.kt
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityModels.kt
+@@ -6,14 +6,29 @@ enum class PersonalityMode {
+     JOUEUR
+ }
+ 
++/**
++ * Vue publiée vers l'UI. Les jauges historiques (happiness, curiosity,
++ * frustration, confidence) sont désormais dérivées des émotions d'origine
++ * dans [-1, 1], ramenées sur [0, 1] pour l'affichage.
++ */
+ data class PersonalityState(
+     val enabled: Boolean = false,
+     val mode: PersonalityMode = PersonalityMode.NORMAL,
+-    val happiness: Float = 0.65f,
+-    val curiosity: Float = 0.55f,
+-    val energy: Float = 0.80f,
+-    val frustration: Float = 0.10f,
+-    val confidence: Float = 0.55f,
++    /** (Happy + 1) / 2 */
++    val happiness: Float = 0.5f,
++    /** (Excited + 1) / 2 — l'original n'a pas de dimension "curiosité". */
++    val curiosity: Float = 0.5f,
++    /** Besoin Energy. */
++    val energy: Float = 1f,
++    /** max(0, -Confident) : 0,6 = frustration mineure, 0,9 = majeure. */
++    val frustration: Float = 0f,
++    /** (Confident + 1) / 2 */
++    val confidence: Float = 0.5f,
++    val play: Float = 1f,
++    val repair: Float = 1f,
++    val emotions: Map<EmotionType, Float> = emptyMap(),
++    val activity: String = "—",
++    val tuningSource: String = PersonalityTuning.DEFAULT.source,
+     val pickedUp: Boolean = false,
+     val knownFaceVisible: Boolean = false,
+     val cubeVisible: Boolean = false,
+@@ -47,6 +62,12 @@ sealed interface PersonalityEvent {
+     data object UserInteraction : PersonalityEvent
+     data object BatteryLow : PersonalityEvent
+     data object IdleTick : PersonalityEvent
++
++    /** Action de la table needs_action_config (Feed, RepairHead...). */
++    data class NeedsAction(
++        val actionId: String,
++        val label: String = actionId
++    ) : PersonalityEvent
+ }
+ 
+ enum class PersonalityLight {
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuning.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuning.kt
+new file mode 100644
+index 0000000..49855a2
+--- /dev/null
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuning.kt
+@@ -0,0 +1,215 @@
++package fr.nvmods.cozmo.personality
++
++/**
++ * Réglages du moteur de personnalité.
++ *
++ * Les valeurs par défaut reprennent le tuning du moteur Cozmo d'origine
++ * (mood_config, emotionevents, needs_*_config, activités freeplay,
++ * reactionTrigger_behavior_map). Un cozmo_personality.json généré depuis
++ * l'APK de l'utilisateur peut les remplacer à l'exécution
++ * (voir PersonalityTuningLoader).
++ *
++ * Les entrées marquées CUSTOM n'existent pas dans l'original : elles couvrent
++ * des perceptions propres à cette appli (tap cube, interaction UI...).
++ */
++
++enum class EmotionType { Happy, Calm, Excited, Brave, Confident, Social, WantToPlay }
++
++enum class NeedId { Repair, Energy, Play }
++
++enum class NeedBracket { Full, Normal, Warning, Critical }
++
++/** Courbe linéaire par morceaux, même sémantique que les "graphs" Anki. */
++class Curve(points: List<Pair<Float, Float>>) {
++    private val pts = points.sortedBy { it.first }
++
++    init {
++        require(pts.isNotEmpty()) { "Courbe vide" }
++    }
++
++    fun eval(x: Float): Float {
++        if (x <= pts.first().first) return pts.first().second
++        if (x >= pts.last().first) return pts.last().second
++        for (i in 1 until pts.size) {
++            val (x1, y1) = pts[i - 1]
++            val (x2, y2) = pts[i]
++            if (x <= x2) {
++                if (x2 == x1) return y2
++                return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
++            }
++        }
++        return pts.last().second
++    }
++
++    companion object {
++        fun of(vararg p: Pair<Number, Number>): Curve =
++            Curve(p.map { it.first.toFloat() to it.second.toFloat() })
++    }
++}
++
++data class MoodTuning(
++    /** x = secondes depuis le dernier changement, y = fraction conservée. */
++    val defaultDecay: Curve,
++    val decay: Map<EmotionType, Curve>,
++    /** x = secondes depuis la dernière occurrence du même événement. */
++    val repetitionPenalty: Curve,
++    val events: Map<String, Map<EmotionType, Float>>
++) {
++    fun decayFor(e: EmotionType): Curve = decay[e] ?: defaultDecay
++}
++
++data class DecayStep(val threshold: Float, val perMinute: Float)
++
++data class NeedsActionDelta(
++    val repair: Float,
++    val energy: Float,
++    val play: Float,
++    val cooldownSec: Float = 0f
++)
++
++data class NeedsTuning(
++    val minLevel: Float,
++    val maxLevel: Float,
++    val initial: Map<NeedId, Float>,
++    /** Borne basse de chaque tranche ; Critical = en dessous de Warning. */
++    val brackets: Map<NeedId, Map<NeedBracket, Float>>,
++    /** Pas de décroissance pendant ce délai après être redevenu plein. */
++    val fullnessCooldownSec: Map<NeedId, Float>,
++    /** Taux quand l'appli est connectée au robot, seuils décroissants. */
++    val connectedDecay: Map<NeedId, List<DecayStep>>,
++    val actions: Map<String, NeedsActionDelta>
++)
++
++data class FrustrationTuning(
++    val minorMaxConfident: Float,
++    val minorCooldownSec: Float,
++    val majorMaxConfident: Float,
++    /** CUSTOM : fenêtre et seuil pour TooManyResumesCliffOrMovement. */
++    val disruptionWindowSec: Float,
++    val disruptionCount: Int
++)
++
++enum class Activity(val label: String) {
++    Socialize("Socialiser"),
++    PlayAlone("Jouer seul"),
++    Hiking("Explorer"),
++    NothingToDo("Rien à faire"),
++    NeedsSevereLowRepair("Besoin critique : réparation"),
++    NeedsSevereLowEnergy("Besoin critique : énergie"),
++    NeedsSevereLowPlay("Besoin critique : jeu")
++}
++
++data class ActivityTiming(
++    /** <= 0 : l'activité dure tant que sa condition tient. */
++    val shouldEndSec: Float,
++    val cooldownSec: Float
++)
++
++data class PersonalityTuning(
++    val mood: MoodTuning,
++    val needs: NeedsTuning,
++    val frustration: FrustrationTuning,
++    val activities: Map<Activity, ActivityTiming>,
++    /** Socialize ne démarre que si Social <= cette valeur (startMoodScorer). */
++    val socializeMaxSocial: Float,
++    val source: String
++) {
++    fun timing(a: Activity): ActivityTiming =
++        activities[a] ?: ActivityTiming(-1f, 0f)
++
++    companion object {
++        private fun ev(vararg a: Pair<EmotionType, Number>) =
++            a.associate { it.first to it.second.toFloat() }
++
++        private fun steps(vararg s: Pair<Number, Number>) =
++            s.map { DecayStep(it.first.toFloat(), it.second.toFloat()) }
++
++        private fun brackets(normal: Float, warning: Float) = mapOf(
++            NeedBracket.Full to 0.99f,
++            NeedBracket.Normal to normal,
++            NeedBracket.Warning to warning,
++            NeedBracket.Critical to 0f
++        )
++
++        val DEFAULT = PersonalityTuning(
++            mood = MoodTuning(
++                defaultDecay = Curve.of(0 to 1, 10 to 1, 30 to 0.9, 75 to 0.6, 150 to 0),
++                decay = mapOf(
++                    EmotionType.WantToPlay to Curve.of(0 to 1),
++                    EmotionType.Social to Curve.of(0 to 1, 10 to 1, 20 to 0.6, 60 to 0.2, 100 to 0),
++                    EmotionType.Confident to Curve.of(0 to 1, 30 to 1, 60 to 0.5, 70 to 0)
++                ),
++                repetitionPenalty = Curve.of(0 to 0, 30 to 1),
++                events = mapOf(
++                    "CliffDetected" to ev(
++                        EmotionType.Happy to -0.12,
++                        EmotionType.Calm to -0.12,
++                        EmotionType.Brave to -0.12
++                    ),
++                    "FoundObservedObject" to ev(EmotionType.Excited to 0.08),
++                    "FoundPossibleObject" to ev(EmotionType.Excited to 0.03),
++                    "LookAtFaceVerified" to ev(EmotionType.Social to 0.08),
++                    "InteractWithUnnamedFace" to ev(EmotionType.Social to 0.6),
++                    "InteractWithNamedFace" to ev(EmotionType.Social to 0.8),
++                    "MotionReact" to ev(
++                        EmotionType.Happy to 0.12,
++                        EmotionType.Excited to 0.12,
++                        EmotionType.Calm to -0.12
++                    ),
++                    "ReactToUnexpectedMovement" to ev(EmotionType.Confident to -0.2),
++                    "TooManyResumesCliffOrMovement" to ev(EmotionType.Confident to -1),
++                    "FinishedMinorFrustration" to ev(EmotionType.Confident to 0.1),
++                    "FinishedMajorFrustration" to ev(EmotionType.Confident to 1),
++                    // CUSTOM
++                    "CubeTapped" to ev(EmotionType.Happy to 0.08, EmotionType.Excited to 0.05),
++                    "Petted" to ev(EmotionType.Happy to 0.08, EmotionType.Calm to 0.05),
++                    "UserInteraction" to ev(EmotionType.Social to 0.2, EmotionType.Happy to 0.05)
++                )
++            ),
++            needs = NeedsTuning(
++                minLevel = 0.03f,
++                maxLevel = 1f,
++                initial = NeedId.entries.associateWith { 1f },
++                brackets = mapOf(
++                    NeedId.Repair to brackets(0.6f, 0.27f),
++                    NeedId.Energy to brackets(0.6f, 0.21f),
++                    NeedId.Play to brackets(0.5f, 0.14f)
++                ),
++                fullnessCooldownSec = NeedId.entries.associateWith { 1200f },
++                connectedDecay = mapOf(
++                    NeedId.Repair to steps(0.6 to 0.0007, 0.3 to 0.0006, 0.03 to 0.0005),
++                    NeedId.Energy to steps(0.6 to 0.005, 0.3 to 0.004, 0.03 to 0.003),
++                    NeedId.Play to steps(0.5 to 0.014, 0.2 to 0.013, 0.03 to 0.012)
++                ),
++                actions = mapOf(
++                    "RepairHead" to NeedsActionDelta(0.33f, 0f, 0f),
++                    "RepairLift" to NeedsActionDelta(0.33f, 0f, 0f),
++                    "RepairTreads" to NeedsActionDelta(0.33f, 0f, 0f),
++                    "Feed" to NeedsActionDelta(0.001f, 0.33f, 0f),
++                    "Fall" to NeedsActionDelta(-0.15f, -0.001f, -0.1f),
++                    "PlacedOnSide" to NeedsActionDelta(0f, -0.001f, -0.03f),
++                    "SeeFace" to NeedsActionDelta(0f, -0.001f, 0.05f, cooldownSec = 60f),
++                    // CUSTOM
++                    "CubePlay" to NeedsActionDelta(0f, -0.001f, 0.05f, cooldownSec = 20f),
++                    "PlayAloneBehavior" to NeedsActionDelta(0f, -0.001f, 0.02f, cooldownSec = 30f),
++                    "BatteryLowSimulated" to NeedsActionDelta(0f, -0.25f, 0f)
++                )
++            ),
++            frustration = FrustrationTuning(
++                minorMaxConfident = -0.6f,
++                minorCooldownSec = 60f,
++                majorMaxConfident = -0.9f,
++                disruptionWindowSec = 60f,
++                disruptionCount = 3
++            ),
++            activities = mapOf(
++                Activity.Socialize to ActivityTiming(300f, 30f),
++                Activity.PlayAlone to ActivityTiming(25f, 30f),
++                Activity.Hiking to ActivityTiming(60f, 15f),
++                Activity.NothingToDo to ActivityTiming(1f, 0f)
++            ),
++            socializeMaxSocial = 0.3f,
++            source = "Valeurs intégrées (tuning d'origine)"
++        )
++    }
++}
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuningLoader.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuningLoader.kt
+new file mode 100644
+index 0000000..5eba437
+--- /dev/null
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/personality/PersonalityTuningLoader.kt
+@@ -0,0 +1,259 @@
++package fr.nvmods.cozmo.personality
++
++/**
++ * Charge un cozmo_personality.json (produit par extract_cozmo_personality.py
++ * à partir de l'APK de l'utilisateur) par-dessus les valeurs intégrées.
++ *
++ * Toute clé absente ou mal formée garde la valeur de base : un fichier
++ * partiel ou d'une autre version ne peut pas casser le moteur.
++ */
++object PersonalityTuningLoader {
++
++    fun fromJson(
++        text: String,
++        base: PersonalityTuning = PersonalityTuning.DEFAULT,
++        sourceLabel: String = "cozmo_personality.json"
++    ): PersonalityTuning {
++        val root = MiniJson.parse(text).obj() ?: error("Racine JSON invalide")
++        val mood = root["mood"].obj()
++        val needs = root["needs"].obj()
++
++        return base.copy(
++            mood = loadMood(mood, base.mood),
++            needs = loadNeeds(needs, base.needs),
++            frustration = loadFrustration(root["reactionTriggers"].arr(), base.frustration),
++            activities = loadActivities(root["activities"].obj()?.get("sub").obj(), base.activities),
++            source = sourceLabel
++        )
++    }
++
++    private fun emotion(name: String): EmotionType? =
++        EmotionType.entries.firstOrNull { it.name == name }
++
++    private fun curve(v: Any?): Curve? {
++        val pts = v.arr()?.mapNotNull { p ->
++            val xy = p.arr() ?: return@mapNotNull null
++            val x = xy.getOrNull(0).num() ?: return@mapNotNull null
++            val y = xy.getOrNull(1).num() ?: return@mapNotNull null
++            x to y
++        }
++        return if (pts.isNullOrEmpty()) null else Curve(pts)
++    }
++
++    private fun loadMood(m: Map<String, Any?>?, base: MoodTuning): MoodTuning {
++        if (m == null) return base
++        val curves = m["decayCurves"].obj().orEmpty()
++        val decay = base.decay.toMutableMap()
++        curves.forEach { (k, v) ->
++            val e = emotion(k) ?: return@forEach
++            curve(v)?.let { decay[e] = it }
++        }
++        val events = base.events.toMutableMap()
++        m["events"].obj()?.forEach { (name, v) ->
++            val aff = v.obj()?.get("affectors").obj() ?: return@forEach
++            val parsed = aff.mapNotNull { (k, x) ->
++                val e = emotion(k) ?: return@mapNotNull null
++                val f = x.num() ?: return@mapNotNull null
++                e to f
++            }.toMap()
++            if (parsed.isNotEmpty()) events[name] = parsed
++        }
++        return base.copy(
++            defaultDecay = curve(curves["default"]) ?: base.defaultDecay,
++            decay = decay,
++            repetitionPenalty = curve(m["repetitionPenalty"]) ?: base.repetitionPenalty,
++            events = events
++        )
++    }
++
++    private fun loadNeeds(n: Map<String, Any?>?, base: NeedsTuning): NeedsTuning {
++        if (n == null) return base
++        val cfg = n["config"].obj().orEmpty()
++
++        fun f(key: String) = cfg[key].num()
++
++        val brackets = base.brackets.mapValues { (need, b) ->
++            b.mapValues { (bracket, v) ->
++                f("BracketLevel${need.name}${bracket.name}") ?: v
++            }
++        }
++        val rates = n["decay"].obj()?.get("DecayRates").obj()
++        val decay = base.connectedDecay.mapValues { (need, steps) ->
++            rates?.get("ConnectedDecayRates${need.name}").arr()?.mapNotNull { s ->
++                val o = s.obj() ?: return@mapNotNull null
++                val t = o["Threshold"].num() ?: return@mapNotNull null
++                val r = o["DecayPerMinute"].num() ?: return@mapNotNull null
++                DecayStep(t, r)
++            }?.takeIf { it.isNotEmpty() }?.sortedByDescending { it.threshold } ?: steps
++        }
++        val actions = base.actions.toMutableMap()
++        n["actionDeltas"].obj()?.forEach { (id, v) ->
++            val o = v.obj() ?: return@forEach
++            actions[id] = NeedsActionDelta(
++                repair = o["repairDelta"].num() ?: 0f,
++                energy = o["energyDelta"].num() ?: 0f,
++                play = o["playDelta"].num() ?: 0f,
++                cooldownSec = o["cooldownSecs"].num() ?: 0f
++            )
++        }
++        return base.copy(
++            minLevel = f("MinimumNeedLevel") ?: base.minLevel,
++            maxLevel = f("MaximumNeedLevel") ?: base.maxLevel,
++            initial = base.initial.mapValues { (need, v) -> f("InitialNeedLevel${need.name}") ?: v },
++            brackets = brackets,
++            fullnessCooldownSec = base.fullnessCooldownSec.mapValues { (need, v) ->
++                f("FullnessDecayCooldown${need.name}") ?: v
++            },
++            connectedDecay = decay,
++            actions = actions
++        )
++    }
++
++    private fun loadFrustration(list: List<Any?>?, base: FrustrationTuning): FrustrationTuning {
++        var t = base
++        list?.forEach { item ->
++            val o = item.obj() ?: return@forEach
++            if (o["reactionTrigger"] != "Frustration") return@forEach
++            val p = o["frustrationParams"].obj() ?: return@forEach
++            when (o["behaviorID"]) {
++                "ReactToFrustrationMinor" -> t = t.copy(
++                    minorMaxConfident = p["maxConfidence"].num() ?: t.minorMaxConfident,
++                    minorCooldownSec = p["cooldownTime_s"].num() ?: t.minorCooldownSec
++                )
++                "ReactToFrustrationMajor" -> t = t.copy(
++                    majorMaxConfident = p["maxConfidence"].num() ?: t.majorMaxConfident
++                )
++            }
++        }
++        return t
++    }
++
++    private fun loadActivities(
++        sub: Map<String, Any?>?,
++        base: Map<Activity, ActivityTiming>
++    ): Map<Activity, ActivityTiming> {
++        if (sub == null) return base
++        return base.mapValues { (activity, timing) ->
++            val strategy = sub[activity.name].obj()?.get("activityStrategy").obj()
++                ?: return@mapValues timing
++            ActivityTiming(
++                shouldEndSec = strategy["activityShouldEndDurationSecs"].num() ?: timing.shouldEndSec,
++                cooldownSec = strategy["cooldownBaseSecs"].num() ?: timing.cooldownSec
++            )
++        }
++    }
++
++    @Suppress("UNCHECKED_CAST")
++    private fun Any?.obj(): Map<String, Any?>? = this as? Map<String, Any?>
++    private fun Any?.arr(): List<Any?>? = this as? List<Any?>
++    private fun Any?.num(): Float? = (this as? Number)?.toFloat()
++}
++
++/** Parseur JSON minimal (objets, tableaux, nombres, chaînes, bool, null). */
++internal object MiniJson {
++    fun parse(text: String): Any? {
++        val p = Parser(text)
++        val v = p.value()
++        p.ws()
++        require(p.i == text.length) { "Contenu JSON inattendu à ${p.i}" }
++        return v
++    }
++
++    private class Parser(val s: String) {
++        var i = 0
++
++        fun ws() {
++            while (i < s.length && s[i].isWhitespace()) i++
++        }
++
++        fun value(): Any? {
++            ws()
++            require(i < s.length) { "Fin de JSON inattendue" }
++            return when (val c = s[i]) {
++                '{' -> obj()
++                '[' -> arr()
++                '"' -> str()
++                't' -> lit("true", true)
++                'f' -> lit("false", false)
++                'n' -> lit("null", null)
++                else -> if (c == '-' || c.isDigit()) num() else error("Caractère JSON invalide '$c' à $i")
++            }
++        }
++
++        fun lit(word: String, v: Any?): Any? {
++            require(s.startsWith(word, i)) { "Littéral invalide à $i" }
++            i += word.length
++            return v
++        }
++
++        fun num(): Double {
++            val start = i
++            while (i < s.length && (s[i].isDigit() || s[i] in "+-.eE")) i++
++            return s.substring(start, i).toDouble()
++        }
++
++        fun str(): String {
++            val sb = StringBuilder()
++            i++
++            while (true) {
++                require(i < s.length) { "Chaîne non terminée" }
++                val c = s[i++]
++                when (c) {
++                    '"' -> return sb.toString()
++                    '\\' -> {
++                        val e = s[i++]
++                        when (e) {
++                            'n' -> sb.append('\n')
++                            't' -> sb.append('\t')
++                            'r' -> sb.append('\r')
++                            'b' -> sb.append('\b')
++                            'f' -> sb.append('\u000C')
++                            'u' -> {
++                                sb.append(s.substring(i, i + 4).toInt(16).toChar())
++                                i += 4
++                            }
++                            else -> sb.append(e)
++                        }
++                    }
++                    else -> sb.append(c)
++                }
++            }
++        }
++
++        fun arr(): List<Any?> {
++            val out = mutableListOf<Any?>()
++            i++
++            ws()
++            if (s[i] == ']') { i++; return out }
++            while (true) {
++                out += value()
++                ws()
++                when (s[i++]) {
++                    ',' -> continue
++                    ']' -> return out
++                    else -> error("',' ou ']' attendu à ${i - 1}")
++                }
++            }
++        }
++
++        fun obj(): Map<String, Any?> {
++            val out = LinkedHashMap<String, Any?>()
++            i++
++            ws()
++            if (s[i] == '}') { i++; return out }
++            while (true) {
++                ws()
++                val k = str()
++                ws()
++                require(s[i++] == ':') { "':' attendu à ${i - 1}" }
++                out[k] = value()
++                ws()
++                when (s[i++]) {
++                    ',' -> continue
++                    '}' -> return out
++                    else -> error("',' ou '}' attendu à ${i - 1}")
++                }
++            }
++        }
++    }
++}
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoApp.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoApp.kt
+index 8921df7..96d4d1f 100644
+--- a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoApp.kt
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoApp.kt
+@@ -453,11 +453,35 @@ private fun PersonalityTab(
+         }
+ 
+         ControlCard("État interne") {
+-            PersonalityMeter("Bonheur", state.happiness)
+-            PersonalityMeter("Curiosité", state.curiosity)
+-            PersonalityMeter("Énergie", state.energy)
+-            PersonalityMeter("Frustration", state.frustration)
++            Text("Activité : " + state.activity, fontWeight = FontWeight.Medium)
++
++            Text("Émotions", fontWeight = FontWeight.Medium)
++            PersonalityMeter("Joie", state.happiness)
++            PersonalityMeter("Excitation", state.curiosity)
+             PersonalityMeter("Confiance", state.confidence)
++            PersonalityMeter("Frustration", state.frustration)
++
++            Text("Besoins", fontWeight = FontWeight.Medium)
++            PersonalityMeter("Énergie", state.energy)
++            PersonalityMeter("Jeu", state.play)
++            PersonalityMeter("Réparation", state.repair)
++            Row(
++                Modifier.fillMaxWidth(),
++                horizontalArrangement = Arrangement.spacedBy(6.dp)
++            ) {
++                FilledTonalButton(
++                    onClick = vm::personalityFeed,
++                    modifier = Modifier.weight(1f)
++                ) { Text("Nourrir") }
++                FilledTonalButton(
++                    onClick = vm::personalityRepair,
++                    modifier = Modifier.weight(1f)
++                ) { Text("Réparer") }
++            }
++            Text(
++                "Réglages : " + state.tuningSource,
++                style = MaterialTheme.typography.bodySmall
++            )
+ 
+             Text("Dernier stimulus : " + state.lastStimulus)
+             Text("Dernière décision : " + state.lastDecision)
+diff --git a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoViewModel.kt b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoViewModel.kt
+index 27bd968..26e81ec 100644
+--- a/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoViewModel.kt
++++ b/cozmo-modern/app/src/main/java/fr/nvmods/cozmo/ui/CozmoViewModel.kt
+@@ -13,6 +13,8 @@ import fr.nvmods.cozmo.personality.CozmoRobotActions
+ import fr.nvmods.cozmo.personality.PersonalityEngine
+ import fr.nvmods.cozmo.personality.PersonalityEvent
+ import fr.nvmods.cozmo.personality.PersonalityMode
++import fr.nvmods.cozmo.personality.PersonalityTuning
++import fr.nvmods.cozmo.personality.PersonalityTuningLoader
+ import fr.nvmods.cozmo.vision.CozmoFaceDetector
+ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.Dispatchers
+@@ -32,7 +34,11 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
+     private val speech = AndroidSpeechBridge(application)
+ 
+     private val personalityRobot = CozmoRobotActions(connection)
+-    private val personality = PersonalityEngine(personalityRobot)
++    private val personality = PersonalityEngine(
++        robot = personalityRobot,
++        tuning = loadPersonalityTuning(application)
++    )
++    private var nextRepairAction = 0
+     private val faceDetector = CozmoFaceDetector()
+     private var personalityTickerJob: Job? = null
+     private var faceDetectionJob: Job? = null
+@@ -259,6 +265,17 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
+     fun personalityBatteryLow() =
+         dispatchPersonality(PersonalityEvent.BatteryLow)
+ 
++    /** Substitut au mini-jeu de nourrissage d'origine (Feed : Energy +0,33). */
++    fun personalityFeed() =
++        dispatchPersonality(PersonalityEvent.NeedsAction("Feed", "Nourri"))
++
++    /** Substitut aux mini-jeux de réparation (tête, lift, chenilles : Repair +0,33 chacun). */
++    fun personalityRepair() {
++        val (id, label) = REPAIR_ACTIONS[nextRepairAction % REPAIR_ACTIONS.size]
++        nextRepairAction++
++        dispatchPersonality(PersonalityEvent.NeedsAction(id, label))
++    }
++
+     private fun dispatchCurrentChassisState() {
+         if (!personality.state.value.enabled || manualMotionActive) return
+ 
+@@ -510,6 +527,35 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
+ 
+     companion object {
+         private const val FACE_REACTION_COOLDOWN_MS = 12_000L
++
++        private val REPAIR_ACTIONS = listOf(
++            "RepairHead" to "Tête réparée",
++            "RepairLift" to "Lift réparé",
++            "RepairTreads" to "Chenilles réparées"
++        )
++
++        /**
++         * Tuning d'origine optionnel : cozmo_personality.json généré depuis
++         * l'APK de l'utilisateur, déposé dans
++         * Android/data/fr.nvmods.cozmo/files/. Sinon valeurs intégrées.
++         */
++        private fun loadPersonalityTuning(application: Application): PersonalityTuning {
++            val file = application.getExternalFilesDir(null)
++                ?.resolve("cozmo_personality.json")
++                ?: return PersonalityTuning.DEFAULT
++            if (!file.isFile) return PersonalityTuning.DEFAULT
++            return try {
++                PersonalityTuningLoader.fromJson(
++                    file.readText(),
++                    sourceLabel = "Fichier : " + file.name
++                )
++            } catch (t: Exception) {
++                PersonalityTuning.DEFAULT.copy(
++                    source = "Valeurs intégrées (fichier illisible : " +
++                        (t.message ?: t::class.java.simpleName).take(80) + ")"
++                )
++            }
++        }
+     }
+ 
+     override fun onCleared() {
+diff --git a/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityBrainTest.kt b/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityBrainTest.kt
+new file mode 100644
+index 0000000..28610cd
+--- /dev/null
++++ b/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityBrainTest.kt
+@@ -0,0 +1,120 @@
++package fr.nvmods.cozmo.personality
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import kotlin.random.Random
++
++class PersonalityBrainTest {
++
++    private fun brain(seed: Int = 1) =
++        PersonalityBrain(PersonalityTuning.DEFAULT, 0L, Random(seed))
++
++    /** Régression v0.15 : l'autonomie ne doit pas s'éteindre après quelques minutes. */
++    @Test
++    fun autonomyKeepsRunningForThirtyMinutes() {
++        val b = brain()
++        var now = 0L
++        var lastQuarterDecisions = 0
++        val end = 30 * 60_000L
++
++        while (now < end) {
++            now += 450L
++            val d = b.onEvent(PersonalityEvent.IdleTick, now)
++            if (d != null && now > end * 3 / 4) lastQuarterDecisions++
++        }
++
++        assertTrue("décisions dans le dernier quart : $lastQuarterDecisions", lastQuarterDecisions > 100)
++        assertTrue(b.needs.bracket(NeedId.Energy) != NeedBracket.Critical)
++    }
++
++    @Test
++    fun repeatedPickupsTriggerMajorFrustrationThenRecovery() {
++        val b = brain()
++        var last: BrainDecision? = null
++
++        for (i in 0 until 3) {
++            val t = i * 2_000L
++            last = b.onEvent(PersonalityEvent.PickedUp, t)
++            b.onEvent(PersonalityEvent.PutDown, t + 1_000L)
++        }
++
++        val decision = requireNotNull(last)
++        assertTrue(decision.label, decision.label.contains("frustration majeure", ignoreCase = true))
++        assertEquals("FinishedMajorFrustration", decision.onCompleteEmotion)
++        assertTrue(b.mood.value(EmotionType.Confident, 4_000L) <= -0.9f)
++
++        b.onDecisionCompleted(decision, 6_000L)
++        assertTrue(b.mood.value(EmotionType.Confident, 6_000L) > -0.2f)
++    }
++
++    @Test
++    fun confidenceAloneDecaysBackWithoutFrustrationLoop() {
++        val b = brain()
++        b.mood.add(EmotionType.Confident, -0.7f, 0L)
++
++        val first = b.onEvent(PersonalityEvent.IdleTick, 100L)
++        assertEquals("Frustration mineure", first?.label)
++
++        // Cooldown de 60 s : pas de seconde réaction mineure juste après.
++        val again = b.onEvent(PersonalityEvent.IdleTick, 1_000L)
++        assertTrue(again?.label != "Frustration mineure")
++
++        // Confident revient à 0 en 70 s.
++        assertEquals(0f, b.mood.value(EmotionType.Confident, 71_000L), 1e-4f)
++    }
++
++    @Test
++    fun activityFollowsWhatCozmoPerceives() {
++        val b = brain()
++        var now = 1_000L
++
++        b.onEvent(PersonalityEvent.IdleTick, now)
++        assertEquals(Activity.Hiking, b.activity)
++
++        b.onEvent(PersonalityEvent.CubeDetected(1L), now)
++        now += 6_000L
++        b.onEvent(PersonalityEvent.IdleTick, now)
++        assertEquals(Activity.PlayAlone, b.activity)
++
++        b.onEvent(PersonalityEvent.FaceDetected(), now)
++        now += 6_000L
++        b.onEvent(PersonalityEvent.IdleTick, now)
++        assertEquals(Activity.Socialize, b.activity)
++
++        b.onEvent(PersonalityEvent.FaceLost, now)
++        now += 1_000L
++        b.onEvent(PersonalityEvent.IdleTick, now)
++        assertEquals(Activity.PlayAlone, b.activity)
++    }
++
++    @Test
++    fun criticalEnergySwitchesToSevereActivityInsteadOfFreezing() {
++        val b = brain()
++        repeat(4) { b.onEvent(PersonalityEvent.BatteryLow, 0L) }
++        assertEquals(NeedBracket.Critical, b.needs.bracket(NeedId.Energy))
++
++        var decisions = 0
++        var now = 0L
++        repeat(200) {
++            now += 450L
++            if (b.onEvent(PersonalityEvent.IdleTick, now) != null) decisions++
++        }
++        assertEquals(Activity.NeedsSevereLowEnergy, b.activity)
++        assertTrue("rythme ralenti mais vivant : $decisions", decisions in 5..60)
++
++        b.onEvent(PersonalityEvent.NeedsAction("Feed"), now)
++        b.onEvent(PersonalityEvent.NeedsAction("Feed"), now + 1)
++        b.onEvent(PersonalityEvent.IdleTick, now + 10_000L)
++        assertTrue(b.activity != Activity.NeedsSevereLowEnergy)
++    }
++
++    @Test
++    fun cubeMotionIsRateLimited() {
++        val b = brain()
++        assertNotNull(b.onEvent(PersonalityEvent.CubeMoved(1L), 0L))
++        assertEquals(null, b.onEvent(PersonalityEvent.CubeMoved(1L), 1_000L))
++        assertNotNull(b.onEvent(PersonalityEvent.CubeMoved(1L), 2_000L))
++    }
++}
+diff --git a/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityManagersTest.kt b/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityManagersTest.kt
+new file mode 100644
+index 0000000..7543818
+--- /dev/null
++++ b/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityManagersTest.kt
+@@ -0,0 +1,110 @@
++package fr.nvmods.cozmo.personality
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class PersonalityManagersTest {
++
++    private val tuning = PersonalityTuning.DEFAULT
++    private val eps = 1e-4f
++
++    @Test
++    fun curveInterpolatesAndClamps() {
++        val c = Curve.of(0 to 1, 10 to 1, 30 to 0.9, 75 to 0.6, 150 to 0)
++        assertEquals(1f, c.eval(-5f), eps)
++        assertEquals(1f, c.eval(10f), eps)
++        assertEquals(0.95f, c.eval(20f), eps)
++        assertEquals(0.3f, c.eval(112.5f), eps)
++        assertEquals(0f, c.eval(500f), eps)
++    }
++
++    @Test
++    fun curveHandlesDuplicateX() {
++        val step = Curve.of(8 to 0, 8 to 1)
++        assertEquals(0f, step.eval(2f), eps)
++        assertEquals(1f, step.eval(9f), eps)
++    }
++
++    @Test
++    fun emotionDecaysBackToZeroWithOriginalCurve() {
++        val mood = MoodManager(tuning.mood)
++        mood.add(EmotionType.Happy, 0.5f, 0L)
++        assertEquals(0.5f, mood.value(EmotionType.Happy, 10_000L), eps)
++        assertEquals(0.3f, mood.value(EmotionType.Happy, 75_000L), eps)
++        assertEquals(0f, mood.value(EmotionType.Happy, 150_000L), eps)
++    }
++
++    @Test
++    fun wantToPlayDoesNotDecay() {
++        val mood = MoodManager(tuning.mood)
++        mood.add(EmotionType.WantToPlay, 0.7f, 0L)
++        assertEquals(0.7f, mood.value(EmotionType.WantToPlay, 3_600_000L), eps)
++    }
++
++    @Test
++    fun repeatedEventIsPenalised() {
++        val mood = MoodManager(tuning.mood)
++        assertEquals(1f, mood.trigger("FoundObservedObject", 0L), eps)
++        assertEquals(0.08f, mood.value(EmotionType.Excited, 0L), eps)
++
++        // Répété immédiatement : aucun effet.
++        assertEquals(0f, mood.trigger("FoundObservedObject", 0L), eps)
++        assertEquals(0.08f, mood.value(EmotionType.Excited, 0L), eps)
++
++        // Répété 15 s plus tard : demi-effet.
++        assertEquals(0.5f, mood.trigger("FoundObservedObject", 15_000L), eps)
++    }
++
++    @Test
++    fun unknownEventIsIgnored() {
++        val mood = MoodManager(tuning.mood)
++        assertEquals(0f, mood.trigger("DoesNotExist", 0L), eps)
++    }
++
++    @Test
++    fun needsRespectFullnessCooldownThenDecayAtOriginalRate() {
++        val needs = NeedsManager(tuning.needs, 0L)
++
++        needs.update(20 * MINUTE)
++        assertEquals(1f, needs.level(NeedId.Energy), eps)
++
++        // 60 min après la fin du cooldown : Energy -0,005/min au-dessus de 0,6.
++        needs.update(80 * MINUTE)
++        assertEquals(0.7f, needs.level(NeedId.Energy), 1e-3f)
++        assertEquals(NeedBracket.Normal, needs.bracket(NeedId.Energy))
++    }
++
++    @Test
++    fun energyNeedsHoursToBecomeCritical() {
++        val needs = NeedsManager(tuning.needs, 0L)
++        needs.update(2 * 60 * MINUTE)
++        assertFalse(needs.bracket(NeedId.Energy) == NeedBracket.Critical)
++    }
++
++    @Test
++    fun feedRestoresEnergyAndCooldownIsHonoured() {
++        val needs = NeedsManager(tuning.needs, 0L)
++        repeat(3) { needs.apply("BatteryLowSimulated", 0L) }
++        val low = needs.level(NeedId.Energy)
++        assertTrue(needs.apply("Feed", 1L))
++        assertEquals(low + 0.33f, needs.level(NeedId.Energy), 1e-3f)
++
++        assertTrue(needs.apply("SeeFace", 0L))
++        assertFalse(needs.apply("SeeFace", 30_000L))
++        assertTrue(needs.apply("SeeFace", 61_000L))
++    }
++
++    @Test
++    fun needsNeverGoBelowMinimum() {
++        val needs = NeedsManager(tuning.needs, 0L)
++        repeat(10) { needs.apply("BatteryLowSimulated", 0L) }
++        assertEquals(tuning.needs.minLevel, needs.level(NeedId.Energy), eps)
++        assertEquals(NeedBracket.Critical, needs.bracket(NeedId.Energy))
++    }
++
++    private companion object {
++        const val MINUTE = 60_000L
++    }
++}
+diff --git a/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityTuningLoaderTest.kt b/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityTuningLoaderTest.kt
+new file mode 100644
+index 0000000..f8b1f42
+--- /dev/null
++++ b/cozmo-modern/app/src/test/java/fr/nvmods/cozmo/personality/PersonalityTuningLoaderTest.kt
+@@ -0,0 +1,86 @@
++package fr.nvmods.cozmo.personality
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class PersonalityTuningLoaderTest {
++
++    private val sample = """
++    {
++      "mood": {
++        "decayCurves": {
++          "default": [[0, 1], [20, 0]],
++          "Social": [[0, 1], [5, 0]],
++          "Unknown": [[0, 1]]
++        },
++        "repetitionPenalty": [[0, 0.5], [10, 1]],
++        "events": {
++          "CliffDetected": {"source": "cliff_events.json", "affectors": {"Brave": -0.5}},
++          "NewEvent": {"affectors": {"Happy": 0.25, "Nope": 1}}
++        }
++      },
++      "needs": {
++        "config": {"BracketLevelEnergyWarning": 0.3, "FullnessDecayCooldownPlay": 0, "MinimumNeedLevel": 0.05},
++        "decay": {"DecayRates": {"ConnectedDecayRatesPlay": [
++          {"Threshold": 0.03, "DecayPerMinute": 0.5},
++          {"Threshold": 0.5, "DecayPerMinute": 0.1}
++        ]}},
++        "actionDeltas": {"Feed": {"repairDelta": 0, "energyDelta": 0.5, "playDelta": 0, "cooldownSecs": 3}}
++      },
++      "reactionTriggers": [
++        {"reactionTrigger": "Frustration", "behaviorID": "ReactToFrustrationMinor",
++         "frustrationParams": {"maxConfidence": -0.5, "cooldownTime_s": 30.0}},
++        {"reactionTrigger": "Frustration", "behaviorID": "ReactToFrustrationMajor",
++         "frustrationParams": {"maxConfidence": -0.8}}
++      ],
++      "activities": {"sub": {
++        "Hiking": {"activityStrategy": {"activityShouldEndDurationSecs": 42.0, "cooldownBaseSecs": 7.0}}
++      }},
++      "behaviors": {"x": {"text": "é\u00e9\"q"}}
++    }
++    """.trimIndent()
++
++    @Test
++    fun overridesKnownKeysAndKeepsDefaultsElsewhere() {
++        val t = PersonalityTuningLoader.fromJson(sample, sourceLabel = "test")
++        val d = PersonalityTuning.DEFAULT
++
++        assertEquals("test", t.source)
++        assertEquals(0.5f, t.mood.defaultDecay.eval(10f), 1e-4f)
++        assertEquals(0f, t.mood.decayFor(EmotionType.Social).eval(5f), 1e-4f)
++        assertEquals(0.5f, t.mood.repetitionPenalty.eval(0f), 1e-4f)
++        assertEquals(mapOf(EmotionType.Brave to -0.5f), t.mood.events["CliffDetected"])
++        assertEquals(mapOf(EmotionType.Happy to 0.25f), t.mood.events["NewEvent"])
++        assertTrue("les événements CUSTOM restent", t.mood.events.containsKey("CubeTapped"))
++
++        assertEquals(0.3f, t.needs.brackets.getValue(NeedId.Energy).getValue(NeedBracket.Warning), 1e-4f)
++        assertEquals(0f, t.needs.fullnessCooldownSec.getValue(NeedId.Play), 1e-4f)
++        assertEquals(0.05f, t.needs.minLevel, 1e-4f)
++        assertEquals(0.5f, t.needs.connectedDecay.getValue(NeedId.Play).last().perMinute, 1e-4f)
++        assertEquals(0.5f, t.needs.connectedDecay.getValue(NeedId.Play).first().threshold, 1e-4f)
++        assertEquals(d.needs.connectedDecay[NeedId.Energy], t.needs.connectedDecay[NeedId.Energy])
++        assertEquals(0.5f, t.needs.actions.getValue("Feed").energy, 1e-4f)
++        assertTrue(t.needs.actions.containsKey("CubePlay"))
++
++        assertEquals(-0.5f, t.frustration.minorMaxConfident, 1e-4f)
++        assertEquals(30f, t.frustration.minorCooldownSec, 1e-4f)
++        assertEquals(-0.8f, t.frustration.majorMaxConfident, 1e-4f)
++
++        assertEquals(42f, t.timing(Activity.Hiking).shouldEndSec, 1e-4f)
++        assertEquals(7f, t.timing(Activity.Hiking).cooldownSec, 1e-4f)
++        assertEquals(d.timing(Activity.Socialize), t.timing(Activity.Socialize))
++    }
++
++    @Test
++    fun emptyObjectGivesDefaults() {
++        val t = PersonalityTuningLoader.fromJson("{}")
++        assertEquals(PersonalityTuning.DEFAULT.needs, t.needs)
++        assertEquals(PersonalityTuning.DEFAULT.frustration, t.frustration)
++    }
++
++    @Test(expected = Exception::class)
++    fun invalidJsonThrows() {
++        PersonalityTuningLoader.fromJson("{\"mood\": [1, 2")
++    }
++}
+-- 
+2.43.0
+
