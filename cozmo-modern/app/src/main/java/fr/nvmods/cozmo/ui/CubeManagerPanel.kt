@@ -147,7 +147,8 @@ private fun CubeDetailCard(
 
             Text(
                 "type=" + cube.objectType +
-                    " • object_id=" + (cube.objectId?.toString() ?: "—") +
+                    " • slot=" + (cube.propSlot?.toString() ?: "—") +
+                    " • id reçu=" + (cube.objectId?.toString() ?: "—") +
                     " • RSSI=" + (cube.rssi?.toString() ?: "—")
             )
 
