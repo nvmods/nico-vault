@@ -24,6 +24,8 @@ import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 enum class ChassisOrientation {
     ON_THREADS,
@@ -763,7 +765,9 @@ class CozmoConnection {
         // composante latérale de la gravité mesurée par l'accéléromètre.
         val orientation = classifyChassisOrientation(
             posePitchRad = posePitch,
-            accelY = accelY
+            accelX = accelX,
+            accelY = accelY,
+            accelZ = accelZ
         )
 
         _state.value = _state.value.copy(
@@ -820,19 +824,46 @@ class CozmoConnection {
 
     companion object {
         private const val FACE_REFRESH_MS = 12_000L
-        private const val SIDE_ACCEL_THRESHOLD = 6_000f
+        private const val SIDE_GRAVITY_RATIO = 0.70f
 
         internal fun classifyChassisOrientation(
             posePitchRad: Float,
-            accelY: Float
-        ): ChassisOrientation =
-            when {
-                posePitchRad < -1.0f -> ChassisOrientation.ON_FACE
-                posePitchRad > 1.0f -> ChassisOrientation.ON_BACK
-                accelY < -SIDE_ACCEL_THRESHOLD -> ChassisOrientation.ON_LEFT_SIDE
-                accelY > SIDE_ACCEL_THRESHOLD -> ChassisOrientation.ON_RIGHT_SIDE
-                else -> ChassisOrientation.ON_THREADS
+            accelX: Float,
+            accelY: Float,
+            accelZ: Float
+        ): ChassisOrientation {
+            if (posePitchRad < -1.0f) {
+                return ChassisOrientation.ON_FACE
             }
+
+            if (posePitchRad > 1.0f) {
+                return ChassisOrientation.ON_BACK
+            }
+
+            val magnitude = sqrt(
+                (
+                    accelX * accelX +
+                        accelY * accelY +
+                        accelZ * accelZ
+                    ).toDouble()
+            ).toFloat()
+
+            if (magnitude < 0.001f) {
+                return ChassisOrientation.ON_THREADS
+            }
+
+            val lateralRatio = abs(accelY) / magnitude
+
+            if (lateralRatio < SIDE_GRAVITY_RATIO) {
+                return ChassisOrientation.ON_THREADS
+            }
+
+            return if (accelY < 0f) {
+                ChassisOrientation.ON_LEFT_SIDE
+            } else {
+                ChassisOrientation.ON_RIGHT_SIDE
+            }
+        }
         private const val STATUS_IS_PICKED_UP = 0x0008L
         private const val STATUS_IS_FALLING = 0x0020L
         private const val STATUS_IS_ON_CHARGER = 0x1000L
