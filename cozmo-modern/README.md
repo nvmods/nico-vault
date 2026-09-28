@@ -2,6 +2,20 @@
 
 Réécriture moderne de l'application Cozmo pour Android actuel, sans dépendance d'exécution à l'ancien moteur natif.
 
+## V0.18 — Humeur, besoins et activités d'origine
+
+Complète le scheduler à identifiants d'origine de la 0.17 :
+
+- **Émotions** (`MoodManager`) : Happy, Calm, Excited, Brave, Confident, Social, WantToPlay dans [-1, 1], retour vers 0 selon les courbes d'origine, pénalité de répétition par événement (`CliffDetected`, `LookAtFaceVerified`, `MotionReact`…).
+- **Besoins** (`NeedsManager`) : Energy / Play / Repair avec taux de décroissance, tranches et cooldown de plénitude (20 min) d'origine. Boutons *Nourrir* et *Réparer* en remplacement des mini-jeux.
+- **Frustration** : dérivée de Confident (mineure ≤ -0,6 → `ReactToFrustrationMinor`, majeure ≤ -0,9 → `ReactToFrustrationMajor`), rebond de confiance en fin de réaction.
+- **Activités** (`PersonalityBrain`) : visage → Socialize (si Social ≤ 0,3) sinon PlayWithHumans, cube → PlayAlone, rien → Hiking, avec durées et cooldowns d'origine ; besoins critiques → activités dédiées au rythme ralenti. Le comportement est ensuite choisi par `OriginalBehaviorScheduler` dans l'activité imposée.
+- Corrige l'arrêt de l'autonomie après quelques minutes (énergie vidée par les ticks, puis verrou `energy < 0.18`).
+
+### Tuning d'origine optionnel
+
+Les valeurs d'origine (humeur, besoins, frustration, durées) sont intégrées. Pour les recharger depuis ton propre APK : générer `cozmo_personality.json` avec `extract_cozmo_personality.py` sur `assets/cozmo_resources/config/engine/`, puis le copier dans `Android/data/fr.nvmods.cozmo/files/`. La source active est affichée dans l'onglet personnalité.
+
 ## V0.7 — CubeManager
 
 La V0.7 garde les fonctions validées (mouvements, caméra, IR, backpack, voix) et remplace la gestion simplifiée des cubes par une vraie couche dédiée.

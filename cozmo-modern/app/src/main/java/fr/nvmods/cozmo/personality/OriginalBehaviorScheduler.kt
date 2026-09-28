@@ -26,9 +26,6 @@ class OriginalBehaviorScheduler(
     private val random: Random = Random.Default
 ) {
     private val lastBehaviorMs = mutableMapOf<String, Long>()
-    private var lastIdleDecisionMs = 0L
-    private var lastActivityId: String? = null
-    private var lastActivityChangeMs = 0L
 
     fun reaction(
         trigger: String,
@@ -45,76 +42,16 @@ class OriginalBehaviorScheduler(
         )
     }
 
-    fun idle(
+    /**
+     * Choisit un comportement d'origine dans l'activité imposée par
+     * PersonalityBrain (qui gère besoins, humeur et durées d'activité).
+     * Repli sur NothingToDo si aucun comportement n'est exécutable.
+     */
+    fun pick(
+        activityId: String,
         state: PersonalityState,
         now: Long
-    ): OriginalBehaviorDecision? {
-        if (state.pickedUp || state.energy < 0.18f) return null
-
-        val minimumGapMs = when (state.mode) {
-            PersonalityMode.CALME -> 2_200L
-            PersonalityMode.NORMAL -> 850L
-            PersonalityMode.JOUEUR -> 500L
-        }
-        if (now - lastIdleDecisionMs < minimumGapMs) return null
-
-        val preferred = preferredActivities(state)
-        for (activityId in preferred) {
-            val decision = chooseFromActivity(activityId, state, now)
-            if (decision != null) {
-                lastIdleDecisionMs = now
-                if (lastActivityId != activityId) {
-                    lastActivityId = activityId
-                    lastActivityChangeMs = now
-                }
-                return decision
-            }
-        }
-
-        return null
-    }
-
-    private fun preferredActivities(state: PersonalityState): List<String> {
-        if (state.knownFaceVisible) {
-            return if (state.mode == PersonalityMode.JOUEUR) {
-                listOf("Socialize", "PlayWithHumans", "Hiking", "NothingToDo")
-            } else {
-                listOf("Socialize", "Hiking", "NothingToDo")
-            }
-        }
-
-        if (state.cubeVisible) {
-            return if (state.mode == PersonalityMode.JOUEUR) {
-                listOf("PlayAlone", "PlayWithHumans", "Hiking", "NothingToDo")
-            } else {
-                listOf("PlayAlone", "Hiking", "NothingToDo")
-            }
-        }
-
-        return when (state.mode) {
-            PersonalityMode.CALME ->
-                listOf("NothingToDo", "Hiking")
-
-            PersonalityMode.NORMAL ->
-                if (state.curiosity >= 0.50f && random.nextFloat() < 0.58f) {
-                    listOf("Hiking", "NothingToDo")
-                } else {
-                    listOf("NothingToDo", "Hiking")
-                }
-
-            PersonalityMode.JOUEUR -> {
-                val roll = random.nextFloat()
-                when {
-                    roll < 0.42f ->
-                        listOf("PlayWithHumans", "Hiking", "NothingToDo")
-                    roll < 0.84f ->
-                        listOf("Hiking", "PlayWithHumans", "NothingToDo")
-                    else ->
-                        listOf("NothingToDo", "Hiking", "PlayWithHumans")
-                }
-            }
-        }
-    }
+    ): OriginalBehaviorDecision? = chooseFromActivity(activityId, state, now)
 
     private fun chooseFromActivity(
         activityId: String,
@@ -391,6 +328,9 @@ object OriginalBehaviorLabels {
             "PlayAlone" -> "Jeu autonome"
             "Hiking" -> "Exploration"
             "NothingToDo" -> "Temps libre"
+            "NeedsSevereLowEnergy" -> "Épuisé"
+            "NeedsSevereLowRepair" -> "Besoin de réparation"
+            "NeedsSevereLowPlay" -> "Besoin de jouer"
             else -> id
         }
 
@@ -416,6 +356,8 @@ object OriginalBehaviorLabels {
             id == "FPPeekABoo" -> "Coucou !"
             id == "PounceOnMotion_Socialize" -> "Il a vu quelque chose bouger"
             id.startsWith("Singing_") -> "Il fredonne"
+            id == "ReactToFrustrationMinor" -> "Il s'agace"
+            id == "ReactToFrustrationMajor" -> "Grosse frustration !"
             else -> id.replace('_', ' ')
         }
 }

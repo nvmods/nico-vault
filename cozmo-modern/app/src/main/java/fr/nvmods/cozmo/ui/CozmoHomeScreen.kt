@@ -226,7 +226,9 @@ private fun PersonalityHero(
 ) {
     val drawable = when {
         personalityState.cubeVisible -> R.drawable.mood_cube
-        personalityState.happiness >= 0.72f -> R.drawable.mood_happy
+        // happiness = (Happy + 1) / 2 : 0,6 correspond à Happy >= 0,2,
+        // les émotions d'origine étant de petits deltas qui retombent vite.
+        personalityState.happiness >= 0.6f -> R.drawable.mood_happy
         else -> R.drawable.mood_explore
     }
 
