@@ -487,7 +487,7 @@ private fun PersonalityTab(
             )
 
             Text(
-                "Angle=" + format2(robotState.poseAngleRad) +
+                "Cap (yaw)=" + format2(robotState.poseAngleRad) +
                     " rad • pitch=" + format2(robotState.posePitchRad) + " rad"
             )
 
@@ -517,6 +517,16 @@ private fun PersonalityTab(
             Text(
                 "Touch backpack raw : " +
                     (robotState.backpackTouchRaw?.toString() ?: "—")
+            )
+
+            Text(
+                "Orientation : dos/face via pitch, côtés via l'accélération Y. Le cap yaw n'intervient plus dans l'orientation.",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Text(
+                "Le tactile backpack reste diagnostic seulement : il n'est pas utilisé par la personnalité tant qu'il n'est pas validé sur ce robot.",
+                style = MaterialTheme.typography.bodySmall
             )
 
             Text(
