@@ -672,8 +672,10 @@ class CozmoRobotActions(
                 LiftFrame(66, 99, 0)
             ),
             body = listOf(
-                BodyFrame(0, 165, -117f),
-                BodyFrame(165, 165, 7f)
+                // Le recul est la partie de sécurité utile du clip "huh".
+                // Le minuscule +7 mm/s suivant est visuel et peut entrer en
+                // conflit avec l'étape native de backing ; on ne le rejoue pas.
+                BodyFrame(0, 165, -117f)
             )
         )
 
