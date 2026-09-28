@@ -55,13 +55,14 @@ class PersonalityEngine(
         var next = evolve(before, event)
         val actions = decide(next, event, now)
 
-        val decision =
-            if (actions.isEmpty()) {
-                if (event == PersonalityEvent.IdleTick) "Repos tranquille" else "Observer"
-            } else {
-                describeDecision(event, actions)
-            }
+        if (actions.isEmpty()) {
+            // Un stimulus ignoré (anti-spam cube, tick sans décision...) ne doit
+            // pas remplacer la dernière vraie action par "Observer".
+            _state.value = next.copy(lastDecision = before.lastDecision)
+            return
+        }
 
+        val decision = describeDecision(event, actions)
         next = next.copy(lastDecision = decision)
         _state.value = next
 
@@ -69,16 +70,14 @@ class PersonalityEngine(
             robot.execute(action)
         }
 
-        if (event != PersonalityEvent.IdleTick || actions.isNotEmpty()) {
-            appendLog(
-                PersonalityLogEntry(
-                    timestampMs = now,
-                    event = describeEvent(event),
-                    decision = decision,
-                    actions = actions
-                )
+        appendLog(
+            PersonalityLogEntry(
+                timestampMs = now,
+                event = describeEvent(event),
+                decision = decision,
+                actions = actions
             )
-        }
+        )
     }
 
     private fun evolve(
@@ -217,24 +216,56 @@ class PersonalityEngine(
                 RobotAction.PlayAnimation("cube_interest")
             )
 
-            is PersonalityEvent.CubeTapped -> listOf(
-                RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
-                RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN),
-                RobotAction.MoveHead(-0.35f, 120),
-                RobotAction.Wait(120),
-                RobotAction.MoveHead(0.35f, 120),
-                RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
-            )
+            is PersonalityEvent.CubeTapped -> when (random.nextInt(4)) {
+                0 -> listOf(
+                    RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+                    RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN),
+                    RobotAction.MoveHead(-0.35f, 120),
+                    RobotAction.Wait(100),
+                    RobotAction.MoveHead(0.35f, 120),
+                    RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+                )
+
+                1 -> listOf(
+                    RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+                    RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN),
+                    RobotAction.PlayAnimation("small_bounce"),
+                    RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+                )
+
+                2 -> listOf(
+                    RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
+                    RobotAction.PlayAnimation("tiny_wiggle"),
+                    RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN)
+                )
+
+                else -> listOf(
+                    RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                    RobotAction.PlayAnimation("cube_peek"),
+                    RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+                )
+            }
 
             is PersonalityEvent.CubeMoved -> {
-                if (now - lastCubeMotionReactionMs < 2_500L) {
+                if (now - lastCubeMotionReactionMs < 1_800L) {
                     emptyList()
                 } else {
                     lastCubeMotionReactionMs = now
-                    listOf(
-                        RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
-                        RobotAction.MoveHead(-0.35f, 140)
-                    )
+                    when (random.nextInt(3)) {
+                        0 -> listOf(
+                            RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                            RobotAction.PlayAnimation("cube_peek")
+                        )
+
+                        1 -> listOf(
+                            RobotAction.PlayAnimation("curious_nod")
+                        )
+
+                        else -> listOf(
+                            RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+                            RobotAction.PlayAnimation("small_bounce")
+                        )
+                    }
                 }
             }
 
@@ -319,20 +350,20 @@ class PersonalityEngine(
         if (state.pickedUp || state.energy < 0.18f) return emptyList()
 
         val cooldownMs = when (state.mode) {
-            PersonalityMode.CALME -> 12_000L
-            PersonalityMode.NORMAL -> 7_500L
-            PersonalityMode.JOUEUR -> 4_500L
+            PersonalityMode.CALME -> 10_000L
+            PersonalityMode.NORMAL -> 5_500L
+            PersonalityMode.JOUEUR -> 3_500L
         }
 
         if (now - lastAutonomousDecisionMs < cooldownMs) return emptyList()
 
         val chance = when (state.mode) {
-            PersonalityMode.CALME -> 0.22f
-            PersonalityMode.NORMAL -> 0.42f
-            PersonalityMode.JOUEUR -> 0.62f
+            PersonalityMode.CALME -> 0.30f
+            PersonalityMode.NORMAL -> 0.62f
+            PersonalityMode.JOUEUR -> 0.82f
         }
 
-        if (state.curiosity < 0.58f || random.nextFloat() > chance) {
+        if (state.curiosity < 0.50f || random.nextFloat() > chance) {
             return emptyList()
         }
 
@@ -417,7 +448,7 @@ class PersonalityEngine(
         actions: List<RobotAction>
     ): String = when (event) {
         is PersonalityEvent.FaceDetected -> "Saluer la personne"
-        is PersonalityEvent.CubeDetected -> "Observer le cube"
+        is PersonalityEvent.CubeDetected -> "S'intéresser au cube"
         is PersonalityEvent.CubeTapped -> "Réagir au tap du cube"
         is PersonalityEvent.CubeMoved -> "Suivre le mouvement du cube"
         PersonalityEvent.PickedUp -> "Réagir au soulèvement"
