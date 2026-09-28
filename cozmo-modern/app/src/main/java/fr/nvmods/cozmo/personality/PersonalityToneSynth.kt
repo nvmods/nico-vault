@@ -2,6 +2,7 @@ package fr.nvmods.cozmo.personality
 
 import kotlin.math.PI
 import kotlin.math.sin
+import kotlin.random.Random
 
 /**
  * Vocalises robotiques procédurales.
@@ -25,7 +26,10 @@ internal object PersonalityToneSynth {
         val mouthHz: Double = 9.0
     )
 
-    fun synthesize(cue: PersonalitySoundCue): ShortArray {
+    fun synthesize(
+        cue: PersonalitySoundCue,
+        random: Random = Random.Default
+    ): ShortArray {
         val syllables = when (cue) {
             PersonalitySoundCue.GREETING -> listOf(
                 Syllable(560.0, 820.0, 105),
@@ -136,7 +140,27 @@ internal object PersonalityToneSynth {
             )
         }
 
-        return render(syllables)
+        // Petite dérive aléatoire de timbre et de tempo : deux CURIOUS
+        // successifs ne doivent plus être strictement identiques.
+        val pitchScale = 0.92 + random.nextDouble() * 0.16
+        val durationScale = 0.90 + random.nextDouble() * 0.20
+        val vibratoScale = 0.92 + random.nextDouble() * 0.18
+        val mouthOffset = -1.2 + random.nextDouble() * 2.4
+
+        val variant = syllables.map { syllable ->
+            syllable.copy(
+                startHz = syllable.startHz * pitchScale,
+                endHz = syllable.endHz * pitchScale,
+                durationMs =
+                    (syllable.durationMs * durationScale)
+                        .toInt()
+                        .coerceAtLeast(45),
+                vibratoHz = syllable.vibratoHz * vibratoScale,
+                mouthHz = (syllable.mouthHz + mouthOffset).coerceAtLeast(2.5)
+            )
+        }
+
+        return render(variant)
     }
 
     private fun render(syllables: List<Syllable>): ShortArray {
