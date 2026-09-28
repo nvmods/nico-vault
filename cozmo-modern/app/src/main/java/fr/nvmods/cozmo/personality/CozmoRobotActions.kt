@@ -3,6 +3,7 @@ package fr.nvmods.cozmo.personality
 import fr.nvmods.cozmo.protocol.BackpackColor
 import fr.nvmods.cozmo.protocol.ConnectionState
 import fr.nvmods.cozmo.protocol.CozmoConnection
+import fr.nvmods.cozmo.protocol.CozmoFaceExpression
 import kotlinx.coroutines.delay
 
 /**
@@ -92,6 +93,23 @@ class CozmoRobotActions(
     }
 
     private suspend fun playMotionMacro(name: String): ActionResult {
+        val expression = when (name) {
+            "greeting" -> CozmoFaceExpression.HAPPY
+            "cube_interest" -> CozmoFaceExpression.CURIOUS
+            "picked_up" -> CozmoFaceExpression.SURPRISED
+            "put_down" -> CozmoFaceExpression.NEUTRAL
+            "happy_small" -> CozmoFaceExpression.HAPPY
+            "playful_invite" -> CozmoFaceExpression.HAPPY
+            "acknowledge" -> CozmoFaceExpression.CURIOUS
+            "low_energy" -> CozmoFaceExpression.SLEEPY
+            "look_around" -> CozmoFaceExpression.CURIOUS
+            else -> null
+        }
+
+        if (expression != null) {
+            connection.setFaceExpression(expression)
+        }
+
         when (name) {
             "greeting" -> {
                 headPulse(0.75f, 130)
@@ -149,6 +167,9 @@ class CozmoRobotActions(
                 )
             }
         }
+
+        delay(220)
+        connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
 
         return ActionResult(ActionStatus.SUCCESS)
     }
