@@ -21,6 +21,9 @@ data class PersonalityState(
     val idleTicks: Long = 0,
     val lastStimulus: String = "Aucun",
     val lastDecision: String = "En attente",
+    val originalActivity: String = "NothingToDo",
+    val originalBehavior: String = "NothingToDo_Idle",
+    val behaviorSource: String = "Compatibilité locale",
     val recoveredFaults: Long = 0,
     val lastFault: String? = null
 )
