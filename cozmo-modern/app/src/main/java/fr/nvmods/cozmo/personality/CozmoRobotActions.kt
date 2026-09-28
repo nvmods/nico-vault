@@ -119,6 +119,12 @@ class CozmoRobotActions(
     private suspend fun playMotionMacro(name: String): ActionResult =
         coroutineScope {
             var completedNormally = false
+
+            // PyCozmo/Anki encadre chaque clip par StartAnimation/EndAnimation.
+            // Sans ce framing, AnimHead/AnimLift peuvent être interprétés de
+            // manière incohérente par le contrôleur d'animation du robot.
+            connection.beginAnimation()
+
             val faceJob = launch {
                 when (name) {
                     "double_blink" -> {
@@ -420,6 +426,7 @@ class CozmoRobotActions(
                 ActionResult(ActionStatus.SUCCESS)
             } finally {
                 faceJob.cancel()
+                connection.endAnimation()
 
                 // Sur une fin normale, chaque mouvement connaît désormais sa
                 // cible ou arrête lui-même les roues : ne pas envoyer un STOP
@@ -727,10 +734,11 @@ class CozmoRobotActions(
         body.forEach { frame ->
             launch {
                 delay(frame.atMs.toLong())
-                connection.drive(frame.speedMmps, frame.speedMmps, 300f)
+                connection.animBody(frame.speedMmps.roundToInt())
                 try {
                     delay(frame.durationMs.toLong())
                 } finally {
+                    // PyCozmo termine les BodyMotion STRAIGHT par DriveWheels(0).
                     connection.drive(0f, 0f, 300f)
                 }
             }
