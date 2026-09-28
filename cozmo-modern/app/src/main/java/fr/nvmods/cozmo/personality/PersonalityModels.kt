@@ -25,6 +25,7 @@ data class PersonalityState(
 
 sealed interface PersonalityEvent {
     data class FaceDetected(val name: String? = null) : PersonalityEvent
+    data object FaceLost : PersonalityEvent
     data class CubeDetected(val cubeId: Long? = null) : PersonalityEvent
     data class CubeTapped(
         val cubeId: Long,
