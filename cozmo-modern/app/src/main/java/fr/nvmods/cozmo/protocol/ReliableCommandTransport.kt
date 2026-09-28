@@ -39,6 +39,9 @@ internal class ReliableCommandTransport(
 ) {
     private val queue = Channel<OutboundBatch>(Channel.UNLIMITED)
     private val mutex = Mutex()
+    // Sérialise la réservation + l'émission afin qu'un paquet audio immédiat
+    // et une frame visage ne puissent jamais partir dans l'ordre inverse.
+    private val txMutex = Mutex()
     private val window = SendSequenceWindow<OutboundCommand>(
         size = WINDOW_SIZE,
         maxSeq = CozmoProtocol.MAX_SEQ
@@ -58,43 +61,46 @@ internal class ReliableCommandTransport(
 
                 var retryCountChanged = false
 
-                val packetsToSend = mutex.withLock {
-                    val now = System.nanoTime()
+                txMutex.withLock {
+                    val packetsToSend = mutex.withLock {
+                        val now = System.nanoTime()
 
-                    // PyCozmo appelle _resend_messages() AVANT
-                    // _collect_messages(). Le snapshot de retransmission doit
-                    // donc contenir uniquement les paquets déjà en attente,
-                    // jamais ceux que l'on va attribuer dans ce même cycle.
-                    val previouslyUnacked = window.entries()
-                    val resend =
-                        if (
-                            previouslyUnacked.isNotEmpty() &&
-                            lastAckTimeNanos != 0L &&
-                            now - lastAckTimeNanos >= ACK_TIMEOUT_NS
-                        ) {
-                            lastAckTimeNanos = now
-                            retries += previouslyUnacked.size
-                            retryCountChanged = true
-                            previouslyUnacked
-                        } else {
-                            emptyList()
+                        // PyCozmo appelle _resend_messages() AVANT
+                        // _collect_messages(). Le snapshot de retransmission doit
+                        // donc contenir uniquement les paquets déjà en attente,
+                        // jamais ceux que l'on va attribuer dans ce même cycle.
+                        val previouslyUnacked = window.entries()
+                        val resend =
+                            if (
+                                previouslyUnacked.isNotEmpty() &&
+                                lastAckTimeNanos != 0L &&
+                                now - lastAckTimeNanos >= ACK_TIMEOUT_NS
+                            ) {
+                                lastAckTimeNanos = now
+                                retries += previouslyUnacked.size
+                                retryCountChanged = true
+                                previouslyUnacked
+                            } else {
+                                emptyList()
+                            }
+
+                        drainQueueIntoCarry()
+
+                        val newPackets =
+                            mutableListOf<Pair<Int, OutboundCommand>>()
+
+                        while (carry.isNotEmpty() && !window.isFull()) {
+                            val command = carry.removeFirst()
+                            val seq = window.put(command)
+                            newPackets += seq to command
                         }
 
-                    drainQueueIntoCarry()
-
-                    val newPackets = mutableListOf<Pair<Int, OutboundCommand>>()
-
-                    while (carry.isNotEmpty() && !window.isFull()) {
-                        val command = carry.removeFirst()
-                        val seq = window.put(command)
-                        newPackets += seq to command
+                        resend + newPackets
                     }
 
-                    resend + newPackets
-                }
-
-                if (packetsToSend.isNotEmpty()) {
-                    sendSequencedPackets(packetsToSend)
+                    if (packetsToSend.isNotEmpty()) {
+                        sendSequencedPackets(packetsToSend)
+                    }
                 }
 
                 if (retryCountChanged) {
@@ -132,25 +138,28 @@ internal class ReliableCommandTransport(
      * attendre le prochain cycle de collecte.
      */
     suspend fun sendImmediate(command: OutboundCommand) {
-        while (scope.isActive) {
-            val packet = mutex.withLock {
-                if (window.isFull()) {
-                    null
-                } else {
-                    val seq = window.put(command)
-                    if (lastAckTimeNanos == 0L) {
-                        lastAckTimeNanos = System.nanoTime()
+        txMutex.withLock {
+            while (scope.isActive) {
+                val packet = mutex.withLock {
+                    if (window.isFull()) {
+                        null
+                    } else {
+                        val seq = window.put(command)
+                        if (lastAckTimeNanos == 0L) {
+                            lastAckTimeNanos = System.nanoTime()
+                        }
+                        seq to command
                     }
-                    seq to command
                 }
-            }
 
-            if (packet != null) {
-                sendSequencedPackets(listOf(packet))
-                return
-            }
+                if (packet != null) {
+                    sendSequencedPackets(listOf(packet))
+                    return
+                }
 
-            delay(2)
+                // Les ACK peuvent libérer la fenêtre pendant cette attente.
+                delay(2)
+            }
         }
     }
 
