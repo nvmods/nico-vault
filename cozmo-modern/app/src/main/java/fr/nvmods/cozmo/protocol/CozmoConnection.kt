@@ -288,10 +288,15 @@ class CozmoConnection {
             return
         }
 
-        sendCommand(
-            CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
-            CozmoFaceDisplay.payload(expression)
-        )
+        val payload = CozmoFaceDisplay.payload(expression)
+        scope.launch {
+            reliableTransport?.sendImmediate(
+                OutboundCommand(
+                    CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
+                    payload
+                )
+            )
+        }
 
         ensureFaceRefresh()
     }
@@ -303,9 +308,11 @@ class CozmoConnection {
         if (_state.value.connection != ConnectionState.READY) return
 
         CozmoFaceDisplay.frames(animation).forEach { frame ->
-            sendCommand(
-                CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
-                frame.payload
+            reliableTransport?.sendImmediate(
+                OutboundCommand(
+                    CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
+                    frame.payload
+                )
             )
             delay(frame.durationMs)
         }
@@ -324,10 +331,12 @@ class CozmoConnection {
                     continue
                 }
 
-                sendCommand(
-                    CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
-                    CozmoFaceDisplay.payload(
-                        _state.value.faceExpression
+                reliableTransport?.sendImmediate(
+                    OutboundCommand(
+                        CozmoFaceDisplay.COMMAND_DISPLAY_IMAGE,
+                        CozmoFaceDisplay.payload(
+                            _state.value.faceExpression
+                        )
                     )
                 )
             }
@@ -489,9 +498,9 @@ class CozmoConnection {
                     }
                 }
             } finally {
-                reliableTransport?.sendImmediate(
-                    OutboundCommand(0x8f)
-                )
+                // Ne jamais suspendre dans le nettoyage d'une coroutine annulée :
+                // l'ordre silence est simplement remis dans la file fiable.
+                sendCommand(0x8f)
                 _state.value = _state.value.copy(audioStreaming = false)
             }
         }
@@ -828,7 +837,7 @@ class CozmoConnection {
     }
 
     companion object {
-        private const val FACE_REFRESH_MS = 12_000L
+        private const val FACE_REFRESH_MS = 4_000L
         private const val AUDIO_FRAME_RATE = 30L
         private const val GRAVITY_AXIS_RATIO = 0.70f
 
