@@ -8,12 +8,15 @@ import java.util.zip.GZIPInputStream
 import kotlin.random.Random
 
 /**
- * Sous-ensemble de SFX officiels du pack Cozmo 3.6.6 fourni par l'utilisateur.
- * Les PCM 22,05 kHz sont compressés en gzip/base64 uniquement pour garder le
- * dépôt léger ; ils sont décompressés en mémoire juste avant OutputAudio.
+ * Couche audio de personnalité.
  *
- * Les VO Wwise originales sont conservées pour une phase suivante : leur
- * codec Wwise Vorbis demande encore un décodeur spécifique.
+ * Les petits SFX 3.6.6 embarqués servent uniquement d'accent mécanique à faible
+ * volume. La couche principale est une vocalise procédurale afin d'éviter les
+ * clics/grésillements constatés lorsque les SFX Scrn/Srv étaient joués seuls.
+ *
+ * Les vraies VO 3.6.6 sont bien présentes dans le pack utilisateur, mais elles
+ * restent en Wwise Vorbis et nécessitent encore un décodeur dédié avant de
+ * pouvoir remplacer cette voix de secours.
  */
 internal object PersonalityAudioCatalog {
     fun samples(
@@ -42,7 +45,50 @@ internal object PersonalityAudioCatalog {
             PersonalitySoundCue.LOW_ENERGY -> listOf(BORED_A, SAD_A)
         }
 
-        return decode(pool[random.nextInt(pool.size)])
+        val mechanical =
+            decode(pool[random.nextInt(pool.size)])
+        val vocal =
+            PersonalityToneSynth.synthesize(cue)
+
+        return mix(
+            vocal = vocal,
+            mechanical = mechanical
+        )
+    }
+
+    /**
+     * Les SFX 3.6.6 sont surtout des accents mécaniques Scrn/Srv : joués seuls,
+     * ils ressemblent à des clics/grésillements. La vocalise procédurale devient
+     * donc la couche principale et le SFX officiel reste discret en arrière-plan.
+     */
+    private fun mix(
+        vocal: ShortArray,
+        mechanical: ShortArray
+    ): ShortArray {
+        val size = maxOf(vocal.size, mechanical.size)
+        val out = ShortArray(size)
+
+        for (i in 0 until size) {
+            val voice =
+                if (i < vocal.size) vocal[i].toInt()
+                else 0
+            val accent =
+                if (i < mechanical.size) {
+                    (mechanical[i].toInt() * 0.10f).toInt()
+                } else {
+                    0
+                }
+
+            out[i] =
+                (voice + accent)
+                    .coerceIn(
+                        Short.MIN_VALUE.toInt(),
+                        Short.MAX_VALUE.toInt()
+                    )
+                    .toShort()
+        }
+
+        return out
     }
 
     private fun decode(value: String): ShortArray {
