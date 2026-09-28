@@ -8,6 +8,8 @@ import fr.nvmods.cozmo.protocol.CozmoFaceExpression
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * Adaptateur entre la personnalité et le vrai robot.
@@ -19,6 +21,8 @@ import kotlinx.coroutines.launch
 class CozmoRobotActions(
     private val connection: CozmoConnection
 ) : RobotActions {
+    private var headTargetRad: Float? = null
+    private var liftTargetMm: Float? = null
 
     override suspend fun execute(action: RobotAction): ActionResult {
         if (
@@ -467,23 +471,47 @@ class CozmoRobotActions(
         }
 
     private suspend fun headPulse(speed: Float, durationMs: Long) {
-        connection.moveHead(speed)
-        try {
-            delay(durationMs)
-        } finally {
-            connection.moveHead(0f)
-        }
-        delay(18)
+        val sensed =
+            connection.state.value.headAngleRad ?: CozmoConnection.HEAD_NEUTRAL_RAD
+        val base = headTargetRad ?: sensed
+        val delta =
+            speed.coerceIn(-1.5f, 1.5f) *
+                (durationMs.coerceIn(40L, 500L) / 1000f) *
+                1.15f
+        val target = (base + delta).coerceIn(
+            CozmoConnection.MIN_HEAD_ANGLE_RAD,
+            CozmoConnection.MAX_HEAD_ANGLE_RAD
+        )
+
+        headTargetRad = target
+        connection.setHeadAngle(
+            angleRad = target,
+            maxSpeedRadPerSec = max(0.9f, abs(speed) * 1.8f),
+            accelRadPerSec2 = 8f
+        )
+        delay(durationMs.coerceAtLeast(85L))
     }
 
     private suspend fun liftPulse(speed: Float, durationMs: Long) {
-        connection.moveLift(speed)
-        try {
-            delay(durationMs)
-        } finally {
-            connection.moveLift(0f)
-        }
-        delay(18)
+        val sensed =
+            connection.state.value.liftHeightMm ?: CozmoConnection.MIN_LIFT_HEIGHT_MM
+        val base = liftTargetMm ?: sensed
+        val deltaMm =
+            speed.coerceIn(-1.5f, 1.5f) *
+                (durationMs.coerceIn(40L, 500L) / 1000f) *
+                85f
+        val target = (base + deltaMm).coerceIn(
+            CozmoConnection.MIN_LIFT_HEIGHT_MM,
+            CozmoConnection.MAX_LIFT_HEIGHT_MM
+        )
+
+        liftTargetMm = target
+        connection.setLiftHeight(
+            heightMm = target,
+            maxSpeedRadPerSec = max(0.8f, abs(speed) * 1.5f),
+            accelRadPerSec2 = 8f
+        )
+        delay(durationMs.coerceAtLeast(85L))
     }
 
     private suspend fun drivePulse(
@@ -491,13 +519,32 @@ class CozmoRobotActions(
         right: Float,
         durationMs: Long
     ) {
-        connection.drive(left, right)
+        val sameDirection =
+            left != 0f &&
+                right != 0f &&
+                (left > 0f) == (right > 0f)
+        val effectiveDuration =
+            if (sameDirection) {
+                durationMs.coerceAtLeast(260L)
+            } else {
+                durationMs.coerceAtLeast(105L)
+            }
+
+        connection.drive(
+            leftMmps = left,
+            rightMmps = right,
+            accelMmps2 = 260f
+        )
         try {
-            delay(durationMs)
+            delay(effectiveDuration)
         } finally {
-            connection.drive(0f, 0f)
+            connection.drive(
+                leftMmps = 0f,
+                rightMmps = 0f,
+                accelMmps2 = 320f
+            )
         }
-        delay(22)
+        delay(30)
     }
 
     private fun PersonalityLight.toBackpack(): BackpackColor =
