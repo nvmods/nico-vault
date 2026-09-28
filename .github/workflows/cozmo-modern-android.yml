@@ -41,12 +41,6 @@ jobs:
         run: |
           base64 -d cozmo-modern/cozmo-modern-test.jks.b64 > cozmo-modern/cozmo-modern-test.jks
 
-      - name: Set 0.18.0 release version
-        working-directory: cozmo-modern
-        run: |
-          sed -i 's/versionCode = 31/versionCode = 32/' app/build.gradle.kts
-          sed -i 's/versionName = "0.17.0"/versionName = "0.18.0"/' app/build.gradle.kts
-
       - name: Unit tests
         working-directory: cozmo-modern
         run: gradle :app:testDebugUnitTest --stacktrace
@@ -57,15 +51,15 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          cp cozmo-modern/app/build/outputs/apk/release/app-release.apk CozmoModern-v0.18.0.apk
-          sha256sum CozmoModern-v0.18.0.apk > CozmoModern-v0.18.0.sha256
+          cp cozmo-modern/app/build/outputs/apk/release/app-release.apk CozmoModern-v0.19.0.apk
+          sha256sum CozmoModern-v0.19.0.apk > CozmoModern-v0.19.0.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CozmoModern-v0.18.0
+          name: CozmoModern-v0.19.0
           path: |
-            CozmoModern-v0.18.0.apk
-            CozmoModern-v0.18.0.sha256
+            CozmoModern-v0.19.0.apk
+            CozmoModern-v0.19.0.sha256
           if-no-files-found: error
           retention-days: 30

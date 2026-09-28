@@ -15,6 +15,8 @@ import fr.nvmods.cozmo.personality.PersonalityEngine
 import fr.nvmods.cozmo.personality.PersonalityEvent
 import fr.nvmods.cozmo.personality.PersonalityMode
 import fr.nvmods.cozmo.personality.OriginalBehaviorProfile
+import fr.nvmods.cozmo.personality.PersonalityTuning
+import fr.nvmods.cozmo.personality.PersonalityTuningLoader
 import fr.nvmods.cozmo.vision.CozmoFaceDetector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -48,8 +50,10 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         }
     private val personality = PersonalityEngine(
         robot = personalityRobot,
-        originalProfile = originalBehaviorProfile
+        originalProfile = originalBehaviorProfile,
+        tuning = loadPersonalityTuning(application)
     )
+    private var nextRepairAction = 0
     private val faceDetector = CozmoFaceDetector()
     private var personalityTickerJob: Job? = null
     private var personalityWatchdogJob: Job? = null
@@ -333,6 +337,17 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun personalityBatteryLow() =
         dispatchPersonality(PersonalityEvent.BatteryLow)
+
+    /** Substitut au mini-jeu de nourrissage d'origine (Feed : Energy +0,33). */
+    fun personalityFeed() =
+        dispatchPersonality(PersonalityEvent.NeedsAction("Feed", "Nourri"))
+
+    /** Substitut aux mini-jeux de réparation (tête, lift, chenilles : Repair +0,33 chacun). */
+    fun personalityRepair() {
+        val (id, label) = REPAIR_ACTIONS[nextRepairAction % REPAIR_ACTIONS.size]
+        nextRepairAction++
+        dispatchPersonality(PersonalityEvent.NeedsAction(id, label))
+    }
 
     private fun dispatchCurrentChassisState() {
         if (!personality.state.value.enabled || manualMotionActive) return
@@ -625,6 +640,35 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         private const val MANUAL_POSITION_HOLD_MS = 700L
         private const val MANUAL_HEAD_ANIMATION_MS = 220L
         private const val PERSONALITY_ACTION_WATCHDOG_MS = 7_500L
+
+        private val REPAIR_ACTIONS = listOf(
+            "RepairHead" to "Tête réparée",
+            "RepairLift" to "Lift réparé",
+            "RepairTreads" to "Chenilles réparées"
+        )
+
+        /**
+         * Tuning d'origine optionnel : cozmo_personality.json généré depuis
+         * l'APK de l'utilisateur, déposé dans
+         * Android/data/fr.nvmods.cozmo/files/. Sinon valeurs intégrées.
+         */
+        private fun loadPersonalityTuning(application: Application): PersonalityTuning {
+            val file = application.getExternalFilesDir(null)
+                ?.resolve("cozmo_personality.json")
+                ?: return PersonalityTuning.DEFAULT
+            if (!file.isFile) return PersonalityTuning.DEFAULT
+            return try {
+                PersonalityTuningLoader.fromJson(
+                    file.readText(),
+                    sourceLabel = "Fichier : " + file.name
+                )
+            } catch (t: Exception) {
+                PersonalityTuning.DEFAULT.copy(
+                    source = "Valeurs intégrées (fichier illisible : " +
+                        (t.message ?: t::class.java.simpleName).take(80) + ")"
+                )
+            }
+        }
     }
 
     override fun onCleared() {

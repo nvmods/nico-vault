@@ -6,14 +6,29 @@ enum class PersonalityMode {
     JOUEUR
 }
 
+/**
+ * Vue publiée vers l'UI. Les jauges historiques (happiness, curiosity,
+ * frustration, confidence) sont dérivées des émotions d'origine dans
+ * [-1, 1], ramenées sur [0, 1] pour l'affichage.
+ */
 data class PersonalityState(
     val enabled: Boolean = false,
     val mode: PersonalityMode = PersonalityMode.NORMAL,
-    val happiness: Float = 0.65f,
-    val curiosity: Float = 0.55f,
-    val energy: Float = 0.80f,
-    val frustration: Float = 0.10f,
-    val confidence: Float = 0.55f,
+    /** (Happy + 1) / 2 */
+    val happiness: Float = 0.5f,
+    /** (Excited + 1) / 2 — l'original n'a pas de dimension "curiosité". */
+    val curiosity: Float = 0.5f,
+    /** Besoin Energy. */
+    val energy: Float = 1f,
+    /** max(0, -Confident) : 0,6 = frustration mineure, 0,9 = majeure. */
+    val frustration: Float = 0f,
+    /** (Confident + 1) / 2 */
+    val confidence: Float = 0.5f,
+    val play: Float = 1f,
+    val repair: Float = 1f,
+    val emotions: Map<EmotionType, Float> = emptyMap(),
+    val activity: String = "—",
+    val tuningSource: String = PersonalityTuning.DEFAULT.source,
     val pickedUp: Boolean = false,
     val knownFaceVisible: Boolean = false,
     val cubeVisible: Boolean = false,
@@ -50,6 +65,12 @@ sealed interface PersonalityEvent {
     data object UserInteraction : PersonalityEvent
     data object BatteryLow : PersonalityEvent
     data object IdleTick : PersonalityEvent
+
+    /** Action de la table needs_action_config (Feed, RepairHead...). */
+    data class NeedsAction(
+        val actionId: String,
+        val label: String = actionId
+    ) : PersonalityEvent
 }
 
 enum class PersonalityLight {

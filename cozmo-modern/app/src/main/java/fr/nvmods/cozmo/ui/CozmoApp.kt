@@ -475,11 +475,35 @@ private fun PersonalityTab(
         }
 
         ControlCard("État interne") {
-            PersonalityMeter("Bonheur", state.happiness)
-            PersonalityMeter("Curiosité", state.curiosity)
-            PersonalityMeter("Énergie", state.energy)
-            PersonalityMeter("Frustration", state.frustration)
+            Text("Activité : " + state.activity, fontWeight = FontWeight.Medium)
+
+            Text("Émotions", fontWeight = FontWeight.Medium)
+            PersonalityMeter("Joie", state.happiness)
+            PersonalityMeter("Excitation", state.curiosity)
             PersonalityMeter("Confiance", state.confidence)
+            PersonalityMeter("Frustration", state.frustration)
+
+            Text("Besoins", fontWeight = FontWeight.Medium)
+            PersonalityMeter("Énergie", state.energy)
+            PersonalityMeter("Jeu", state.play)
+            PersonalityMeter("Réparation", state.repair)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = vm::personalityFeed,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Nourrir") }
+                FilledTonalButton(
+                    onClick = vm::personalityRepair,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Réparer") }
+            }
+            Text(
+                "Réglages : " + state.tuningSource,
+                style = MaterialTheme.typography.bodySmall
+            )
 
             Text("Dernier stimulus : " + state.lastStimulus)
             Text("Dernière décision : " + state.lastDecision)

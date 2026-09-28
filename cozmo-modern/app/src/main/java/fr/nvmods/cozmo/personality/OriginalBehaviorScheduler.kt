@@ -45,11 +45,30 @@ class OriginalBehaviorScheduler(
         )
     }
 
+    /**
+     * Choisit un comportement d'origine dans l'activité imposée par
+     * PersonalityBrain (qui gère besoins, humeur et durées d'activité).
+     * [enteringActivity] active les comportements d'entrée
+     * (Hiking_FirstLookIntro...). Repli sur NothingToDo si rien n'est exécutable.
+     */
+    fun pick(
+        activityId: String,
+        state: PersonalityState,
+        now: Long,
+        enteringActivity: Boolean
+    ): OriginalBehaviorDecision? =
+        chooseFromActivity(activityId, state, now, enteringActivity)
+
+    /**
+     * Sélection autonome historique (activité + comportement). Le moteur
+     * passe désormais par PersonalityBrain + pick() ; conservé pour les
+     * tests et comme référence.
+     */
     fun idle(
         state: PersonalityState,
         now: Long
     ): OriginalBehaviorDecision? {
-        if (state.pickedUp || state.energy < 0.18f) return null
+        if (state.pickedUp) return null
 
         val minimumGapMs = when (state.mode) {
             PersonalityMode.CALME -> 2_200L
@@ -489,6 +508,9 @@ object OriginalBehaviorLabels {
             "PlayAlone" -> "Jeu autonome"
             "Hiking" -> "Exploration"
             "NothingToDo" -> "Temps libre"
+            "NeedsSevereLowEnergy" -> "Épuisé"
+            "NeedsSevereLowRepair" -> "Besoin de réparation"
+            "NeedsSevereLowPlay" -> "Besoin de jouer"
             else -> id
         }
 
@@ -514,6 +536,8 @@ object OriginalBehaviorLabels {
             id == "FPPeekABoo" -> "Coucou !"
             id == "PounceOnMotion_Socialize" -> "Il a vu quelque chose bouger"
             id.startsWith("Singing_") -> "Il fredonne"
+            id == "ReactToFrustrationMinor" -> "Il s'agace"
+            id == "ReactToFrustrationMajor" -> "Grosse frustration !"
             else -> id.replace('_', ' ')
         }
 }
