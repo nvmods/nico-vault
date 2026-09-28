@@ -13,6 +13,7 @@ import fr.nvmods.cozmo.personality.CozmoRobotActions
 import fr.nvmods.cozmo.personality.PersonalityEngine
 import fr.nvmods.cozmo.personality.PersonalityEvent
 import fr.nvmods.cozmo.personality.PersonalityMode
+import fr.nvmods.cozmo.personality.OriginalBehaviorProfile
 import fr.nvmods.cozmo.vision.CozmoFaceDetector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,21 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     private val speech = AndroidSpeechBridge(application)
 
     private val personalityRobot = CozmoRobotActions(connection)
-    private val personality = PersonalityEngine(personalityRobot)
+    private val originalBehaviorProfile =
+        runCatching {
+            application.assets
+                .open("personality/cozmo_3_6_6_profile.json")
+                .bufferedReader()
+                .use { reader ->
+                    OriginalBehaviorProfile.fromJson(reader.readText())
+                }
+        }.getOrElse {
+            OriginalBehaviorProfile.fallback()
+        }
+    private val personality = PersonalityEngine(
+        robot = personalityRobot,
+        originalProfile = originalBehaviorProfile
+    )
     private val faceDetector = CozmoFaceDetector()
     private var personalityTickerJob: Job? = null
     private var faceDetectionJob: Job? = null
