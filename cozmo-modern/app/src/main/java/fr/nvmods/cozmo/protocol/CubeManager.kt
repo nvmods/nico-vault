@@ -6,8 +6,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
 
 enum class CubeUpAxis(val raw: Int, val label: String) {
@@ -65,6 +63,7 @@ internal class CubeManager(
     // qu'un seul propriétaire physique (factory_id) à un instant donné.
     private val activeFactoryByObjectId = mutableMapOf<Long, Long>()
     private val lastSeenNanos = ConcurrentHashMap<Long, Long>()
+    private val nextConnectAllowedNanos = ConcurrentHashMap<Long, Long>()
     private val lastAdvertPublishNanos = ConcurrentHashMap<Long, Long>()
     private val lastAccelPublishNanos = ConcurrentHashMap<Long, Long>()
     private val accelWantedFactories = mutableSetOf<Long>()
@@ -89,6 +88,7 @@ internal class CubeManager(
         }
 
         lastSeenNanos.clear()
+        nextConnectAllowedNanos.clear()
         lastAdvertPublishNanos.clear()
         lastAccelPublishNanos.clear()
         publish()
@@ -116,54 +116,45 @@ internal class CubeManager(
     }
 
     fun onObjectAvailable(payload: ByteArray) {
-        if (payload.size < 9) return
-
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        val factoryId = b.int.toLong() and 0xffffffffL
-        val objectType = b.int
-        val rssi = b.get().toInt()
-
-        if (objectType !in 1..3) return
+        val event = CubeWireProtocol.decodeObjectAvailable(payload) ?: return
+        if (event.objectType !in 1..3) return
 
         val now = System.nanoTime()
-        lastSeenNanos[factoryId] = now
+        lastSeenNanos[event.factoryId] = now
 
         var publishNow = false
 
         synchronized(lock) {
-            val previous = cubesByFactory[factoryId]
+            val previous = cubesByFactory[event.factoryId]
             val next =
-                (previous ?: CubeInfo(factoryId = factoryId)).copy(
-                    objectType = objectType,
-                    rssi = rssi
+                (previous ?: CubeInfo(factoryId = event.factoryId)).copy(
+                    objectType = event.objectType,
+                    rssi = event.rssi
                 )
 
-            cubesByFactory[factoryId] = next
+            cubesByFactory[event.factoryId] = next
 
-            val lastUi = lastAdvertPublishNanos[factoryId] ?: 0L
+            val lastUi = lastAdvertPublishNanos[event.factoryId] ?: 0L
             publishNow =
                 previous == null ||
-                    previous.objectType != objectType ||
+                    previous.objectType != event.objectType ||
                     (
-                        previous.rssi != rssi &&
+                        previous.rssi != event.rssi &&
                             now - lastUi >= RSSI_UI_PERIOD_NS
                     )
         }
 
         if (publishNow) {
-            lastAdvertPublishNanos[factoryId] = now
+            lastAdvertPublishNanos[event.factoryId] = now
             publish()
         }
     }
-
     fun onObjectConnectionState(payload: ByteArray) {
-        if (payload.size < 13) return
-
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        val objectId = b.int.toLong() and 0xffffffffL
-        val factoryId = b.int.toLong() and 0xffffffffL
-        val objectType = b.int
-        val connected = b.get().toInt() != 0
+        val event = CubeWireProtocol.decodeObjectConnectionState(payload) ?: return
+        val objectId = event.objectId
+        val factoryId = event.factoryId
+        val objectType = event.objectType
+        val connected = event.connected
 
         if (connected) {
             if (connectingFactoryId == factoryId) {
@@ -184,7 +175,6 @@ internal class CubeManager(
                     val displaced = cubesByFactory[oldOwner]
                     if (displaced != null) {
                         cubesByFactory[oldOwner] = displaced.copy(
-                            objectId = null,
                             connected = false,
                             lastEvent = "object_id réattribué — reconnexion"
                         )
@@ -203,6 +193,7 @@ internal class CubeManager(
 
                 activeFactoryByObjectId[objectId] = factoryId
                 lastSeenNanos[factoryId] = System.nanoTime()
+                nextConnectAllowedNanos.remove(factoryId)
 
                 cubesByFactory[factoryId] = previous.copy(
                     objectId = objectId,
@@ -246,7 +237,6 @@ internal class CubeManager(
                 current ?: CubeInfo(factoryId = factoryId)
 
             val next = previous.copy(
-                objectId = null,
                 objectType = objectType,
                 connected = false,
                 disconnectCount =
@@ -268,6 +258,9 @@ internal class CubeManager(
 
         if (staleDisconnect) return
 
+        nextConnectAllowedNanos[factoryId] =
+            System.nanoTime() + RECONNECT_BACKOFF_NS
+
         if (connectingFactoryId == factoryId) {
             connectWaiter?.complete(false)
         }
@@ -276,143 +269,96 @@ internal class CubeManager(
     }
 
     fun onObjectPowerLevel(payload: ByteArray) {
-        if (payload.size < 9) return
+        val event = CubeWireProtocol.decodeObjectPowerLevel(payload) ?: return
 
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        val objectId = b.int.toLong() and 0xffffffffL
-        val missedPackets = b.int.toLong() and 0xffffffffL
-        val batteryLevel = b.get().toInt() and 0xff
-
-        updateByObjectId(objectId) {
+        updateByObjectId(event.objectId) {
             it.copy(
-                batteryLevel = batteryLevel,
-                missedPackets = missedPackets
+                batteryLevel = event.batteryLevel,
+                missedPackets = event.missedPackets
             )
         }
     }
-
     fun onObjectAccel(payload: ByteArray) {
-        if (payload.size < 20) return
-
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int
-        val objectId = b.int.toLong() and 0xffffffffL
-        val x = b.float
-        val y = b.float
-        val z = b.float
+        val event = CubeWireProtocol.decodeObjectAccel(payload) ?: return
 
         val now = System.nanoTime()
-        val last = lastAccelPublishNanos[objectId] ?: 0L
+        val last = lastAccelPublishNanos[event.objectId] ?: 0L
         val publishNow = now - last >= ACCEL_UI_PERIOD_NS
 
         updateByObjectId(
-            objectId = objectId,
+            objectId = event.objectId,
             publishChanges = publishNow
         ) {
             it.copy(
-                accelX = x,
-                accelY = y,
-                accelZ = z
+                accelX = event.x,
+                accelY = event.y,
+                accelZ = event.z
             )
         }
 
         if (publishNow) {
-            lastAccelPublishNanos[objectId] = now
+            lastAccelPublishNanos[event.objectId] = now
         }
     }
-
     fun onObjectMoved(payload: ByteArray) {
-        if (payload.size < 21) return
+        val event = CubeWireProtocol.decodeObjectMoved(payload) ?: return
 
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int
-        val objectId = b.int.toLong() and 0xffffffffL
-        val x = b.float
-        val y = b.float
-        val z = b.float
-        val axis = b.get().toInt() and 0xff
-
-        updateByObjectId(objectId) {
+        updateByObjectId(event.objectId) {
             it.copy(
-                accelX = x,
-                accelY = y,
-                accelZ = z,
-                upAxis = CubeUpAxis.fromRaw(axis),
+                accelX = event.x,
+                accelY = event.y,
+                accelZ = event.z,
+                upAxis = CubeUpAxis.fromRaw(event.upAxis),
                 moving = true,
                 lastEvent = "Mouvement"
             )
         }
     }
-
     fun onObjectStoppedMoving(payload: ByteArray) {
-        if (payload.size < 8) return
+        val event = CubeWireProtocol.decodeObjectStopped(payload) ?: return
 
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int
-        val objectId = b.int.toLong() and 0xffffffffL
-
-        updateByObjectId(objectId) {
+        updateByObjectId(event.objectId) {
             it.copy(
                 moving = false,
                 lastEvent = "Arrêt"
             )
         }
     }
-
     fun onObjectTapped(payload: ByteArray) {
-        if (payload.size < 12) return
+        val event = CubeWireProtocol.decodeObjectTapped(payload) ?: return
 
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int
-        val objectId = b.int.toLong() and 0xffffffffL
-        val numTaps = b.get().toInt() and 0xff
-        val tapTime = b.get().toInt() and 0xff
-        val tapNeg = b.get().toInt()
-        val tapPos = b.get().toInt()
-
-        updateByObjectId(objectId) {
+        updateByObjectId(event.objectId) {
             it.copy(
-                tapCount = it.tapCount + numTaps.coerceAtLeast(1),
-                tapIntensity = maxOf(kotlin.math.abs(tapNeg), kotlin.math.abs(tapPos)),
-                lastEvent = "Tap x" + numTaps + " (" + tapTime + ")"
+                tapCount = it.tapCount + event.numTaps.coerceAtLeast(1),
+                tapIntensity = maxOf(
+                    kotlin.math.abs(event.tapNeg),
+                    kotlin.math.abs(event.tapPos)
+                ),
+                lastEvent = "Tap x" + event.numTaps + " (" + event.tapTime + ")"
             )
         }
     }
-
     fun onObjectTapFiltered(payload: ByteArray) {
-        if (payload.size < 10) return
+        val event = CubeWireProtocol.decodeObjectTapFiltered(payload) ?: return
 
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int
-        val objectId = b.int.toLong() and 0xffffffffL
-        b.get()
-        val intensity = b.get().toInt() and 0xff
-
-        updateByObjectId(objectId) {
+        updateByObjectId(event.objectId) {
             it.copy(
-                tapIntensity = intensity,
-                lastEvent = "Tap filtré (" + intensity + ")"
+                tapIntensity = event.intensity,
+                lastEvent = "Tap filtré (" + event.intensity + ")"
             )
         }
     }
-
     fun onObjectUpAxisChanged(payload: ByteArray) {
-        if (payload.size < 9) return
+        val event = CubeWireProtocol.decodeObjectUpAxisChanged(payload) ?: return
+        val parsedAxis = CubeUpAxis.fromRaw(event.axis)
 
-        val b = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int
-        val objectId = b.int.toLong() and 0xffffffffL
-        val axis = b.get().toInt() and 0xff
-        val parsedAxis = CubeUpAxis.fromRaw(axis)
-
-        updateByObjectId(objectId) {
+        updateByObjectId(event.objectId) {
             it.copy(
                 upAxis = parsedAxis,
                 lastEvent = "Face haute " + parsedAxis.label
             )
         }
     }
-
     fun setAccelStreaming(factoryId: Long, enabled: Boolean) {
         synchronized(lock) {
             if (enabled) {
@@ -479,17 +425,16 @@ internal class CubeManager(
         val objectId = activeObjectIdForFactory(factoryId) ?: return
 
         val selectPayload =
-            cubeIdPayload(
+            CubeWireProtocol.cubeId(
                 objectId = objectId,
-                rotationPeriodFrames =
-                    rotationPeriodFrames.coerceIn(1, 255)
+                rotationPeriodFrames = rotationPeriodFrames
             )
 
         val states = listOf(
-            animatedLightState(color),
-            solidLightState(BackpackColor.OFF),
-            solidLightState(BackpackColor.OFF),
-            solidLightState(BackpackColor.OFF)
+            CubeWireProtocol.animatedLightState(color),
+            CubeWireProtocol.solidLightState(BackpackColor.OFF),
+            CubeWireProtocol.solidLightState(BackpackColor.OFF),
+            CubeWireProtocol.solidLightState(BackpackColor.OFF)
         )
 
         sendCubeTransaction(
@@ -532,13 +477,10 @@ internal class CubeManager(
         val objectId = activeObjectIdForFactory(factoryId) ?: return
 
         val selectPayload =
-            cubeIdPayload(
-                objectId = objectId,
-                rotationPeriodFrames = 0
-            )
+            CubeWireProtocol.cubeId(objectId)
 
         val states =
-            colors.map(::solidLightState)
+            colors.map(CubeWireProtocol::solidLightState)
 
         sendCubeTransaction(
             factoryId = factoryId,
@@ -558,20 +500,15 @@ internal class CubeManager(
     ) {
         if (states.size != 4) return
 
-        val lights = ByteBuffer.allocate(40)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .apply {
-                states.forEach { put(it) }
-            }
-            .array()
+        val lights = CubeWireProtocol.cubeLights(states)
 
         // PyCozmo place CubeId puis CubeLights dans la même file d'émission.
         // Le collecteur transport les encode donc ensemble quand ils tiennent
         // dans la même trame ENGINE. Ne pas insérer de barrière ACK entre eux.
         sendBatch(
             listOf(
-                OutboundCommand(0x10, selectPayload),
-                OutboundCommand(0x04, lights)
+                OutboundCommand(CubeWireProtocol.CMD_CUBE_ID, selectPayload),
+                OutboundCommand(CubeWireProtocol.CMD_CUBE_LIGHTS, lights)
             )
         )
 
@@ -589,13 +526,10 @@ internal class CubeManager(
     ) {
         val objectId = activeObjectIdForFactory(factoryId) ?: return
 
-        val payload = ByteBuffer.allocate(5)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .putInt(objectId.toInt())
-            .put((if (enabled) 1 else 0).toByte())
-            .array()
+        val payload =
+            CubeWireProtocol.streamObjectAccel(objectId, enabled)
 
-        sendCommand(0x08, payload)
+        sendCommand(CubeWireProtocol.CMD_STREAM_OBJECT_ACCEL, payload)
 
         updateByFactoryId(factoryId) {
             it.copy(
@@ -643,13 +577,10 @@ internal class CubeManager(
         }
         publish()
 
-        val payload = ByteBuffer.allocate(5)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .putInt(candidate.factoryId.toInt())
-            .put(1.toByte())
-            .array()
+        val payload =
+            CubeWireProtocol.objectConnect(candidate.factoryId, true)
 
-        sendCommand(0x05, payload)
+        sendCommand(CubeWireProtocol.CMD_OBJECT_CONNECT, payload)
 
         val result =
             withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
@@ -664,6 +595,8 @@ internal class CubeManager(
             if (result != true) {
                 val current = cubesByFactory[candidate.factoryId]
                 if (current != null && !current.connected) {
+                    nextConnectAllowedNanos[candidate.factoryId] =
+                        System.nanoTime() + RECONNECT_BACKOFF_NS
                     cubesByFactory[candidate.factoryId] =
                         current.copy(
                             lastEvent =
@@ -689,6 +622,7 @@ internal class CubeManager(
                 .filter {
                     !it.connected &&
                         it.objectType in 1..3 &&
+                        now >= (nextConnectAllowedNanos[it.factoryId] ?: 0L) &&
                         now - (lastSeenNanos[it.factoryId] ?: 0L) <
                             AVAILABLE_MAX_AGE_NS
                 }
@@ -768,62 +702,6 @@ internal class CubeManager(
         if (changed && publishChanges) publish()
     }
 
-    private fun cubeIdPayload(
-        objectId: Long,
-        rotationPeriodFrames: Int
-    ): ByteArray =
-        ByteBuffer.allocate(5)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .putInt(objectId.toInt())
-            .put(rotationPeriodFrames.toByte())
-            .array()
-
-    private fun solidLightState(
-        color: BackpackColor
-    ): ByteArray {
-        val encoded = cubeColorValue(color)
-
-        return ByteBuffer.allocate(10)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .putShort(encoded.toShort())
-            .putShort(encoded.toShort())
-            .put(0)
-            .put(0)
-            .put(0)
-            .put(0)
-            .putShort(0)
-            .array()
-    }
-
-    private fun animatedLightState(
-        color: BackpackColor
-    ): ByteArray {
-        val encoded = cubeColorValue(color)
-
-        return ByteBuffer.allocate(10)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .putShort(encoded.toShort())
-            .putShort(0)
-            .put(5)
-            .put(20)
-            .put(5)
-            .put(10)
-            .putShort(0)
-            .array()
-    }
-
-    private fun cubeColorValue(color: BackpackColor): Int =
-        when (color) {
-            BackpackColor.WHITE -> {
-                val r = 8
-                val g = 8
-                val b = 16
-                (r shl 10) or (g shl 5) or b
-            }
-
-            else -> color.encoded
-        }
-
     private fun publish() {
         val snapshot = synchronized(lock) {
             val next =
@@ -850,6 +728,7 @@ internal class CubeManager(
         private const val CONNECT_TIMEOUT_MS = 2_500L
         private const val BETWEEN_CONNECTS_MS = 220L
         private const val AVAILABLE_MAX_AGE_NS = 8_000_000_000L
+        private const val RECONNECT_BACKOFF_NS = 3_000_000_000L
 
         // Le manager ne pilote plus la découverte radio : il attend les
         // ObjectAvailable spontanés du body et ne gère que les connexions.
