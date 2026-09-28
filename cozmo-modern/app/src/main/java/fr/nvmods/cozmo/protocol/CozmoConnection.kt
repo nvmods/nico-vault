@@ -227,7 +227,20 @@ class CozmoConnection {
     }
 
     fun setAccessoryDiscovery(enabled: Boolean) {
-        _state.value = _state.value.copy(cubeDiscovery = enabled)
+        // Ne jamais envoyer de commande LightCube pendant le handshake robot.
+        // Les cubes ne sont activables qu'une fois Cozmo complètement READY.
+        if (enabled && _state.value.connection != ConnectionState.READY) {
+            _state.value = _state.value.copy(
+                cubeDiscovery = false,
+                lastError = "Cubes indisponibles tant que Cozmo n'est pas READY"
+            )
+            return
+        }
+
+        _state.value = _state.value.copy(
+            cubeDiscovery = enabled,
+            lastError = null
+        )
         cubeManager.setDiscovery(enabled)
     }
 
