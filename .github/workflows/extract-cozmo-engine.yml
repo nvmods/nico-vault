@@ -1,0 +1,67 @@
+name: Extract original Cozmo engine
+
+on:
+  push:
+    branches:
+      - cozmo-modern-v0
+    paths:
+      - '.github/workflows/extract-cozmo-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  XAPK_URL: https://d.apkpure.net/b/XAPK/com.digitaldreamlabs.cozmo2?version=latest
+  XAPK_SIZE: "442556759"
+  ENGINE_SHA256: "00e15430aaa1e6c549454aacaaf7a0a5b76a5b0c79254aebc8bfb395c8cc8bca"
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cozmo-modern-v0
+
+      - name: Download original Cozmo 3.6.6 XAPK
+        run: |
+          set -euxo pipefail
+          mkdir -p work/xapk cozmo-binaries
+          curl -fL --retry 5 --retry-delay 3 "$XAPK_URL" -o work/Cozmo_3.6.6.xapk
+          test "$(stat -c %s work/Cozmo_3.6.6.xapk)" -eq "$XAPK_SIZE"
+          unzip -q work/Cozmo_3.6.6.xapk -d work/xapk
+
+      - name: Extract original libcozmoEngine.so
+        run: |
+          set -euxo pipefail
+          APK="$(find work/xapk -maxdepth 2 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          unzip -p "$APK" lib/arm64-v8a/libcozmoEngine.so > cozmo-binaries/libcozmoEngine.so
+          test -s cozmo-binaries/libcozmoEngine.so
+          HASH="$(sha256sum cozmo-binaries/libcozmoEngine.so | awk '{print $1}')"
+          echo "libcozmoEngine.so SHA256=$HASH"
+          test "$HASH" = "$ENGINE_SHA256"
+
+      - name: Commit binary to branch
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cozmo-binaries/libcozmoEngine.so
+          if git diff --cached --quiet; then
+            echo "Binary already present and identical."
+          else
+            git commit -m "Add original Cozmo 3.6.6 libcozmoEngine.so"
+            git push origin HEAD:cozmo-modern-v0
+          fi
+
+      - name: Upload standalone engine backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: libcozmoEngine-original-3.6.6
+          path: cozmo-binaries/libcozmoEngine.so
+          if-no-files-found: error
+          retention-days: 30
