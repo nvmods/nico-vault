@@ -82,7 +82,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.13.0",
+                        "Cozmo Modern 0.14.0",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -520,7 +520,7 @@ private fun PersonalityTab(
             )
 
             Text(
-                "Orientation : dos/face via pitch, côtés via l'accélération Y. Le cap yaw n'intervient plus dans l'orientation.",
+                "Orientation : axe de gravité dominant X/Y/Z. Face, wheelie, côtés, chenilles et dos sont distingués ; le pitch ne sert plus qu'en secours.",
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -537,7 +537,7 @@ private fun PersonalityTab(
 
         ControlCard("Tests de perception") {
             Text(
-                "Les cubes alimentent déjà automatiquement le moteur. Ces boutons restent utiles pour tester les autres réactions avant leurs capteurs réels.",
+                "Les cubes et la présence d'un visage alimentent maintenant automatiquement le moteur. L'identification nominative d'une personne n'est pas encore enrôlée ; le bouton Visage reste un test manuel.",
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -549,7 +549,7 @@ private fun PersonalityTab(
                     onClick = { vm.personalityFace("Nico") },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Visage")
+                    Text("Visage test")
                 }
                 FilledTonalButton(
                     onClick = vm::personalityPickedUp,
