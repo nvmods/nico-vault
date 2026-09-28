@@ -76,7 +76,7 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Text(
-                        "Cozmo Modern 0.10.2",
+                        "Cozmo Modern 0.10.3",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
