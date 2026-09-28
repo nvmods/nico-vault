@@ -3,8 +3,11 @@ package fr.nvmods.cozmo.personality
 import fr.nvmods.cozmo.protocol.BackpackColor
 import fr.nvmods.cozmo.protocol.ConnectionState
 import fr.nvmods.cozmo.protocol.CozmoConnection
+import fr.nvmods.cozmo.protocol.CozmoFaceAnimation
 import fr.nvmods.cozmo.protocol.CozmoFaceExpression
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Adaptateur entre les intentions de personnalité et le vrai robot.
@@ -69,7 +72,7 @@ class CozmoRobotActions(
             }
 
             is RobotAction.PlaySound -> {
-                val samples = PersonalityToneSynth.synthesize(action.cue)
+                val samples = PersonalityAudioCatalog.samples(action.cue)
                 connection.playPcm22050(samples)
                 ActionResult(ActionStatus.SUCCESS)
             }
@@ -92,163 +95,199 @@ class CozmoRobotActions(
         }
     }
 
-    private suspend fun playMotionMacro(name: String): ActionResult {
-        val expression = when (name) {
-            "greeting" -> CozmoFaceExpression.HAPPY
-            "cube_interest" -> CozmoFaceExpression.CURIOUS
-            "picked_up" -> CozmoFaceExpression.SURPRISED
-            "put_down" -> CozmoFaceExpression.NEUTRAL
-            "happy_small" -> CozmoFaceExpression.HAPPY
-            "playful_invite" -> CozmoFaceExpression.HAPPY
-            "acknowledge" -> CozmoFaceExpression.CURIOUS
-            "low_energy" -> CozmoFaceExpression.SLEEPY
-            "look_around" -> CozmoFaceExpression.CURIOUS
-            "idle_blink" -> CozmoFaceExpression.BLINK
-            "double_blink" -> CozmoFaceExpression.BLINK
-            "curious_nod" -> CozmoFaceExpression.CURIOUS
-            "head_peek" -> CozmoFaceExpression.CURIOUS
-            "small_bounce" -> CozmoFaceExpression.HAPPY
-            "tiny_wiggle" -> CozmoFaceExpression.HAPPY
-            "cube_peek" -> CozmoFaceExpression.CURIOUS
-            "on_back_notice" -> CozmoFaceExpression.SURPRISED
-            "on_face_notice" -> CozmoFaceExpression.SAD
-            "on_side_notice" -> CozmoFaceExpression.CURIOUS
-            "fall_notice" -> CozmoFaceExpression.SURPRISED
-            "cliff_notice" -> CozmoFaceExpression.SURPRISED
-            else -> null
-        }
+    private suspend fun playMotionMacro(name: String): ActionResult =
+        coroutineScope {
+            val faceJob = launch {
+                when (name) {
+                    "double_blink" -> {
+                        connection.playFaceAnimation(CozmoFaceAnimation.BLINK)
+                        delay(80)
+                        connection.playFaceAnimation(CozmoFaceAnimation.BLINK)
+                    }
 
-        if (expression != null) {
-            connection.setFaceExpression(expression)
-        }
-
-        when (name) {
-            "greeting" -> {
-                headPulse(0.75f, 130)
-                headPulse(-0.45f, 90)
+                    else -> faceAnimationFor(name)?.let {
+                        connection.playFaceAnimation(it)
+                    }
+                }
             }
 
-            "cube_interest" -> {
-                headPulse(-0.55f, 130)
-                liftPulse(0.55f, 90)
-                liftPulse(-0.45f, 80)
+            val known = when (name) {
+                "greeting" -> {
+                    headPulse(0.75f, 130)
+                    headPulse(-0.45f, 90)
+                    true
+                }
+
+                "cube_interest" -> {
+                    headPulse(-0.55f, 130)
+                    liftPulse(0.55f, 90)
+                    liftPulse(-0.45f, 80)
+                    true
+                }
+
+                "picked_up" -> {
+                    headPulse(0.65f, 100)
+                    liftPulse(0.60f, 100)
+                    true
+                }
+
+                "put_down" -> {
+                    liftPulse(-0.45f, 80)
+                    headPulse(0.35f, 80)
+                    true
+                }
+
+                "happy_small" -> {
+                    headPulse(0.65f, 90)
+                    headPulse(-0.60f, 90)
+                    headPulse(0.45f, 75)
+                    true
+                }
+
+                "playful_invite" -> {
+                    drivePulse(-45f, 45f, 150)
+                    drivePulse(45f, -45f, 280)
+                    drivePulse(-45f, 45f, 140)
+                    true
+                }
+
+                "acknowledge" -> {
+                    headPulse(-0.42f, 90)
+                    headPulse(0.42f, 90)
+                    true
+                }
+
+                "low_energy" -> {
+                    headPulse(-0.40f, 180)
+                    liftPulse(-0.35f, 160)
+                    true
+                }
+
+                "look_around" -> {
+                    drivePulse(-32f, 32f, 150)
+                    drivePulse(32f, -32f, 300)
+                    drivePulse(-32f, 32f, 150)
+                    true
+                }
+
+                "idle_blink" -> {
+                    delay(130)
+                    true
+                }
+
+                "double_blink" -> {
+                    delay(180)
+                    true
+                }
+
+                "curious_nod" -> {
+                    headPulse(-0.38f, 95)
+                    headPulse(0.42f, 110)
+                    true
+                }
+
+                "head_peek" -> {
+                    headPulse(0.45f, 120)
+                    delay(90)
+                    headPulse(-0.28f, 85)
+                    true
+                }
+
+                "small_bounce" -> {
+                    liftPulse(0.45f, 75)
+                    headPulse(0.38f, 75)
+                    liftPulse(-0.35f, 65)
+                    true
+                }
+
+                "tiny_wiggle" -> {
+                    drivePulse(-24f, 24f, 105)
+                    drivePulse(24f, -24f, 210)
+                    drivePulse(-24f, 24f, 105)
+                    true
+                }
+
+                "cube_peek" -> {
+                    headPulse(-0.48f, 115)
+                    liftPulse(0.38f, 80)
+                    delay(100)
+                    liftPulse(-0.30f, 70)
+                    true
+                }
+
+                "on_back_notice" -> {
+                    headPulse(0.32f, 90)
+                    true
+                }
+
+                "on_face_notice" -> {
+                    liftPulse(-0.28f, 85)
+                    true
+                }
+
+                "on_side_notice" -> {
+                    headPulse(0.30f, 75)
+                    true
+                }
+
+                "fall_notice" -> {
+                    connection.stopAllMotors()
+                    delay(120)
+                    true
+                }
+
+                "cliff_notice" -> {
+                    connection.stopAllMotors()
+                    headPulse(-0.42f, 95)
+                    true
+                }
+
+                else -> false
             }
 
-            "picked_up" -> {
-                headPulse(0.65f, 100)
-                liftPulse(0.60f, 100)
-            }
-
-            "put_down" -> {
-                liftPulse(-0.45f, 80)
-                headPulse(0.35f, 80)
-            }
-
-            "happy_small" -> {
-                headPulse(0.65f, 90)
-                headPulse(-0.60f, 90)
-                headPulse(0.45f, 75)
-            }
-
-            "playful_invite" -> {
-                drivePulse(-45f, 45f, 150)
-                drivePulse(45f, -45f, 280)
-                drivePulse(-45f, 45f, 140)
-            }
-
-            "acknowledge" -> {
-                headPulse(-0.42f, 90)
-                headPulse(0.42f, 90)
-            }
-
-            "low_energy" -> {
-                headPulse(-0.40f, 180)
-                liftPulse(-0.35f, 160)
-            }
-
-            "look_around" -> {
-                drivePulse(-32f, 32f, 150)
-                drivePulse(32f, -32f, 300)
-                drivePulse(-32f, 32f, 150)
-            }
-
-            "idle_blink" -> {
-                delay(130)
-            }
-
-            "double_blink" -> {
-                delay(90)
-                connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
-                delay(90)
-                connection.setFaceExpression(CozmoFaceExpression.BLINK)
-                delay(90)
-            }
-
-            "curious_nod" -> {
-                headPulse(-0.38f, 95)
-                headPulse(0.42f, 110)
-            }
-
-            "head_peek" -> {
-                headPulse(0.45f, 120)
-                delay(90)
-                headPulse(-0.28f, 85)
-            }
-
-            "small_bounce" -> {
-                liftPulse(0.45f, 75)
-                headPulse(0.38f, 75)
-                liftPulse(-0.35f, 65)
-            }
-
-            "tiny_wiggle" -> {
-                drivePulse(-24f, 24f, 105)
-                drivePulse(24f, -24f, 210)
-                drivePulse(-24f, 24f, 105)
-            }
-
-            "cube_peek" -> {
-                headPulse(-0.48f, 115)
-                liftPulse(0.38f, 80)
-                delay(100)
-                liftPulse(-0.30f, 70)
-            }
-
-            "on_back_notice" -> {
-                headPulse(0.32f, 90)
-            }
-
-            "on_face_notice" -> {
-                liftPulse(-0.28f, 85)
-            }
-
-            "on_side_notice" -> {
-                headPulse(0.30f, 75)
-            }
-
-            "fall_notice" -> {
-                connection.stopAllMotors()
-                delay(120)
-            }
-
-            "cliff_notice" -> {
-                connection.stopAllMotors()
-                headPulse(-0.42f, 95)
-            }
-
-            else -> {
-                return ActionResult(
+            if (!known) {
+                faceJob.cancel()
+                return@coroutineScope ActionResult(
                     ActionStatus.NOT_AVAILABLE,
                     "Macro inconnue: $name"
                 )
             }
+
+            faceJob.join()
+            connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
+            ActionResult(ActionStatus.SUCCESS)
         }
 
-        delay(220)
-        connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
+    private fun faceAnimationFor(name: String): CozmoFaceAnimation? =
+        when (name) {
+            "greeting",
+            "happy_small",
+            "playful_invite",
+            "small_bounce",
+            "tiny_wiggle" -> CozmoFaceAnimation.HAPPY
 
-        return ActionResult(ActionStatus.SUCCESS)
-    }
+            "cube_interest",
+            "cube_peek",
+            "curious_nod",
+            "head_peek",
+            "acknowledge",
+            "on_side_notice" -> CozmoFaceAnimation.CURIOUS
+
+            "picked_up",
+            "on_back_notice" -> CozmoFaceAnimation.PICKUP
+
+            "low_energy",
+            "on_face_notice" -> CozmoFaceAnimation.BORED
+
+            "look_around" -> CozmoFaceAnimation.EYES_IDLE
+            "idle_blink" -> CozmoFaceAnimation.BLINK
+
+            "fall_notice",
+            "cliff_notice" -> CozmoFaceAnimation.CLIFF
+
+            "put_down" -> CozmoFaceAnimation.BLINK
+            else -> null
+        }
 
     private suspend fun headPulse(speed: Float, durationMs: Long) {
         connection.moveHead(speed)
