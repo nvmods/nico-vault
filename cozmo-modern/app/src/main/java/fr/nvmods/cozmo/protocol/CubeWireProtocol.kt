@@ -12,7 +12,7 @@ import java.nio.ByteOrder
  */
 internal object CubeWireProtocol {
     const val CMD_CUBE_LIGHTS = 0x04
-    const val CMD_OBJECT_CONNECT = 0x05
+    const val CMD_SET_PROP_SLOT = 0x05
     const val CMD_STREAM_OBJECT_ACCEL = 0x08
     const val CMD_SET_ACCESSORY_DISCOVERY = 0x0a
     const val CMD_CUBE_ID = 0x10
@@ -189,12 +189,25 @@ internal object CubeWireProtocol {
         )
     }
 
-    fun objectConnect(factoryId: Long, connect: Boolean = true): ByteArray =
-        ByteBuffer.allocate(5)
+    /**
+     * Message 0x05 vérifié dans libcozmoEngine.so 3.4.3 :
+     * SetPropSlot(factory_id:uint32, slot:uint8).
+     *
+     * Le 5e octet n'est PAS un booléen "connect". L'engine officiel gère
+     * cinq slots (0..4) et utilise factory_id=0 pour vider un slot.
+     */
+    fun setPropSlot(factoryId: Long, slot: Int): ByteArray {
+        require(slot in 0..4) { "Prop slot hors plage: $slot" }
+
+        return ByteBuffer.allocate(5)
             .order(ByteOrder.LITTLE_ENDIAN)
             .putInt(factoryId.toInt())
-            .put((if (connect) 1 else 0).toByte())
+            .put(slot.toByte())
             .array()
+    }
+
+    fun clearPropSlot(slot: Int): ByteArray =
+        setPropSlot(factoryId = 0L, slot = slot)
 
     fun streamObjectAccel(objectId: Long, enabled: Boolean): ByteArray =
         ByteBuffer.allocate(5)
