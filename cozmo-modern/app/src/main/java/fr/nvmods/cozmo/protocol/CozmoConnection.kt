@@ -99,6 +99,7 @@ class CozmoConnection {
     val state: StateFlow<CozmoState> = _state.asStateFlow()
 
     private val sendMutex = Mutex()
+    private val audioMutex = Mutex()
     private val cameraAssembler = CozmoCameraAssembler()
     private val receiveWindow = ReceiveSequenceWindow<CozmoProtocol.Packet>(
         size = 62,
@@ -443,56 +444,56 @@ class CozmoConnection {
     suspend fun playPcm22050(samples: ShortArray) {
         if (samples.isEmpty()) return
 
-        _state.value = _state.value.copy(audioStreaming = true)
+        audioMutex.withLock {
+            _state.value = _state.value.copy(audioStreaming = true)
 
-        try {
-            sendCommand(0x9f)
+            try {
+                var offset = 0
+                val frameDurationNanos =
+                    1_000_000_000L / AUDIO_FRAME_RATE
 
-            var offset = 0
+                val streamStart = System.nanoTime()
+                var frameIndex = 0L
 
-            val frameDurationNanos =
-                CozmoAudioCodec.packetDurationNanos()
+                while (offset < samples.size) {
+                    val payload =
+                        CozmoAudioCodec.encodePacket(
+                            samples = samples,
+                            offset = offset
+                        )
 
-            val streamStart = System.nanoTime()
-            var frameIndex = 0L
-
-            while (offset < samples.size) {
-                // PyCozmo laisse le reste du dernier paquet à 0.
-                // Le codec Cozmo n'utilise PAS le mapping μ-law téléphonie
-                // standard où 0xff représente le silence.
-                val payload =
-                    CozmoAudioCodec.encodePacket(
-                        samples = samples,
-                        offset = offset
+                    val count = minOf(
+                        CozmoAudioCodec.SAMPLES_PER_PACKET,
+                        samples.size - offset
                     )
 
-                val count = minOf(
-                    CozmoAudioCodec.SAMPLES_PER_PACKET,
-                    samples.size - offset
-                )
-
-                sendCommand(0x8e, payload)
-                offset += count
-                frameIndex++
-
-                // 744 / 22050 = 33,741... ms. On se cale sur une horloge
-                // absolue pour éviter la dérive d'un simple delay(34).
-                val target =
-                    streamStart + frameIndex * frameDurationNanos
-                val remaining =
-                    target - System.nanoTime()
-
-                if (remaining > 0) {
-                    delay(
-                        (remaining + 999_999L) /
-                            1_000_000L
+                    reliableTransport?.sendImmediate(
+                        OutboundCommand(0x8e, payload)
                     )
+                    offset += count
+                    frameIndex++
+
+                    // Le contrôleur d'animation Cozmo consomme une trame audio
+                    // à 30 Hz. Se caler sur cette horloge évite les petits
+                    // trous audibles entre paquets.
+                    val target =
+                        streamStart + frameIndex * frameDurationNanos
+                    val remaining =
+                        target - System.nanoTime()
+
+                    if (remaining > 0) {
+                        delay(
+                            (remaining + 999_999L) /
+                                1_000_000L
+                        )
+                    }
                 }
+            } finally {
+                reliableTransport?.sendImmediate(
+                    OutboundCommand(0x8f)
+                )
+                _state.value = _state.value.copy(audioStreaming = false)
             }
-
-            sendCommand(0x8f)
-        } finally {
-            _state.value = _state.value.copy(audioStreaming = false)
         }
     }
 
@@ -523,7 +524,10 @@ class CozmoConnection {
             listOf(
                 OutboundCommand(0x45, CozmoProtocol.setOriginPayload()),
                 OutboundCommand(0x4b, CozmoProtocol.syncTimePayload()),
-                OutboundCommand(0x60, byteArrayOf(1))
+                OutboundCommand(0x60, byteArrayOf(1)),
+                // Active une seule fois les états animation/audio, comme
+                // l'AnimationController PyCozmo. Ne pas le renvoyer à chaque son.
+                OutboundCommand(0x9f)
             )
         )
 
@@ -825,6 +829,7 @@ class CozmoConnection {
 
     companion object {
         private const val FACE_REFRESH_MS = 12_000L
+        private const val AUDIO_FRAME_RATE = 30L
         private const val GRAVITY_AXIS_RATIO = 0.70f
 
         /**
