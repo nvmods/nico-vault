@@ -56,8 +56,11 @@ class PersonalityEngine(
         val actions = decide(next, event, now)
 
         val decision =
-            if (actions.isEmpty()) "Observer"
-            else describeDecision(event, actions)
+            if (actions.isEmpty()) {
+                if (event == PersonalityEvent.IdleTick) "Repos tranquille" else "Observer"
+            } else {
+                describeDecision(event, actions)
+            }
 
         next = next.copy(lastDecision = decision)
         _state.value = next
@@ -66,14 +69,16 @@ class PersonalityEngine(
             robot.execute(action)
         }
 
-        appendLog(
-            PersonalityLogEntry(
-                timestampMs = now,
-                event = describeEvent(event),
-                decision = decision,
-                actions = actions
+        if (event != PersonalityEvent.IdleTick || actions.isNotEmpty()) {
+            appendLog(
+                PersonalityLogEntry(
+                    timestampMs = now,
+                    event = describeEvent(event),
+                    decision = decision,
+                    actions = actions
+                )
             )
-        )
+        }
     }
 
     private fun evolve(
@@ -125,6 +130,34 @@ class PersonalityEngine(
                 pickedUp = false,
                 frustration = (current.frustration - 0.04f).unit(),
                 lastStimulus = "Cozmo reposé"
+            )
+
+            PersonalityEvent.OnBack -> current.copy(
+                frustration = (current.frustration + 0.10f).unit(),
+                curiosity = (current.curiosity + 0.03f).unit(),
+                lastStimulus = "Sur le dos"
+            )
+
+            PersonalityEvent.OnFace -> current.copy(
+                frustration = (current.frustration + 0.12f).unit(),
+                lastStimulus = "Sur la face"
+            )
+
+            PersonalityEvent.OnSide -> current.copy(
+                frustration = (current.frustration + 0.06f).unit(),
+                lastStimulus = "Sur le côté"
+            )
+
+            PersonalityEvent.Falling -> current.copy(
+                confidence = (current.confidence - 0.08f).unit(),
+                frustration = (current.frustration + 0.10f).unit(),
+                lastStimulus = "Chute détectée"
+            )
+
+            PersonalityEvent.CliffDetected -> current.copy(
+                confidence = (current.confidence - 0.06f).unit(),
+                frustration = (current.frustration + 0.08f).unit(),
+                lastStimulus = "Bord détecté"
             )
 
             PersonalityEvent.Touched -> current.copy(
@@ -216,6 +249,37 @@ class PersonalityEngine(
                 RobotAction.PlayAnimation("put_down")
             )
 
+            PersonalityEvent.OnBack -> listOf(
+                RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.SURPRISED),
+                RobotAction.PlayAnimation("on_back_notice")
+            )
+
+            PersonalityEvent.OnFace -> listOf(
+                RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.SURPRISED),
+                RobotAction.PlayAnimation("on_face_notice")
+            )
+
+            PersonalityEvent.OnSide -> listOf(
+                RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                RobotAction.PlayAnimation("on_side_notice")
+            )
+
+            PersonalityEvent.Falling -> listOf(
+                RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.SURPRISED),
+                RobotAction.PlayAnimation("fall_notice")
+            )
+
+            PersonalityEvent.CliffDetected -> listOf(
+                RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.CLIFF),
+                RobotAction.Backpack(PersonalityLight.RED),
+                RobotAction.PlayAnimation("cliff_notice")
+            )
+
             PersonalityEvent.Touched -> listOf(
                 RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
                 RobotAction.PlayAnimation("happy_small")
@@ -255,38 +319,91 @@ class PersonalityEngine(
         if (state.pickedUp || state.energy < 0.18f) return emptyList()
 
         val cooldownMs = when (state.mode) {
-            PersonalityMode.CALME -> 18_000L
-            PersonalityMode.NORMAL -> 10_000L
-            PersonalityMode.JOUEUR -> 6_000L
+            PersonalityMode.CALME -> 12_000L
+            PersonalityMode.NORMAL -> 7_500L
+            PersonalityMode.JOUEUR -> 4_500L
         }
 
         if (now - lastAutonomousDecisionMs < cooldownMs) return emptyList()
 
         val chance = when (state.mode) {
-            PersonalityMode.CALME -> 0.10f
-            PersonalityMode.NORMAL -> 0.24f
-            PersonalityMode.JOUEUR -> 0.40f
+            PersonalityMode.CALME -> 0.22f
+            PersonalityMode.NORMAL -> 0.42f
+            PersonalityMode.JOUEUR -> 0.62f
         }
 
-        if (state.curiosity < 0.62f || random.nextFloat() > chance) return emptyList()
+        if (state.curiosity < 0.58f || random.nextFloat() > chance) {
+            return emptyList()
+        }
 
         lastAutonomousDecisionMs = now
 
-        return if (state.cubeVisible) {
-            listOf(
-                RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
-                RobotAction.PlayAnimation("cube_interest"),
-                RobotAction.MoveHead(-0.45f, 180)
+        if (state.cubeVisible) {
+            return when (random.nextInt(4)) {
+                0 -> listOf(
+                    RobotAction.PlayAnimation("cube_interest")
+                )
+
+                1 -> listOf(
+                    RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                    RobotAction.PlayAnimation("cube_peek")
+                )
+
+                2 -> listOf(
+                    RobotAction.PlayAnimation("idle_blink"),
+                    RobotAction.Wait(120),
+                    RobotAction.PlayAnimation("curious_nod")
+                )
+
+                else -> listOf(
+                    RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+                    RobotAction.PlayAnimation("small_bounce")
+                )
+            }
+        }
+
+        return when (random.nextInt(
+            when (state.mode) {
+                PersonalityMode.CALME -> 4
+                PersonalityMode.NORMAL -> 6
+                PersonalityMode.JOUEUR -> 8
+            }
+        )) {
+            0 -> listOf(
+                RobotAction.PlayAnimation("idle_blink")
             )
-        } else {
-            listOf(
+
+            1 -> listOf(
+                RobotAction.PlayAnimation("curious_nod")
+            )
+
+            2 -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                RobotAction.PlayAnimation("head_peek")
+            )
+
+            3 -> listOf(
+                RobotAction.PlayAnimation("small_bounce")
+            )
+
+            4 -> listOf(
                 RobotAction.PlaySound(PersonalitySoundCue.BORED),
-                RobotAction.MoveHead(0.55f, 150),
-                RobotAction.Wait(120),
-                RobotAction.MoveHead(-0.55f, 300),
-                RobotAction.Wait(120),
-                RobotAction.MoveHead(0.55f, 150),
                 RobotAction.PlayAnimation("look_around")
+            )
+
+            5 -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.PLAYFUL),
+                RobotAction.PlayAnimation("tiny_wiggle")
+            )
+
+            6 -> listOf(
+                RobotAction.PlayAnimation("double_blink"),
+                RobotAction.PlayAnimation("head_peek")
+            )
+
+            else -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+                RobotAction.PlayAnimation("playful_invite")
             )
         }
     }
@@ -305,12 +422,17 @@ class PersonalityEngine(
         is PersonalityEvent.CubeMoved -> "Suivre le mouvement du cube"
         PersonalityEvent.PickedUp -> "Réagir au soulèvement"
         PersonalityEvent.PutDown -> "Réagir au retour au sol"
+        PersonalityEvent.OnBack -> "Constater qu'il est sur le dos"
+        PersonalityEvent.OnFace -> "Constater qu'il est sur la face"
+        PersonalityEvent.OnSide -> "Constater qu'il est sur le côté"
+        PersonalityEvent.Falling -> "Réagir à la chute"
+        PersonalityEvent.CliffDetected -> "Sécuriser le bord"
         PersonalityEvent.Touched -> "Réagir au contact"
         PersonalityEvent.UserInteraction -> "Répondre à l'utilisateur"
         PersonalityEvent.BatteryLow -> "Passer en énergie basse"
         PersonalityEvent.CubeLost -> "Chercher le cube"
         PersonalityEvent.IdleTick ->
-            if (actions.isEmpty()) "Observer" else "Explorer du regard"
+            if (actions.isEmpty()) "Repos tranquille" else "Faire sa vie"
     }
 
     private fun describeEvent(event: PersonalityEvent): String = when (event) {
@@ -329,6 +451,11 @@ class PersonalityEngine(
         PersonalityEvent.CubeLost -> "Cube perdu"
         PersonalityEvent.PickedUp -> "Soulevé"
         PersonalityEvent.PutDown -> "Reposé"
+        PersonalityEvent.OnBack -> "Sur le dos"
+        PersonalityEvent.OnFace -> "Sur la face"
+        PersonalityEvent.OnSide -> "Sur le côté"
+        PersonalityEvent.Falling -> "Chute"
+        PersonalityEvent.CliffDetected -> "Bord détecté"
         PersonalityEvent.Touched -> "Touché"
         PersonalityEvent.UserInteraction -> "Interaction"
         PersonalityEvent.BatteryLow -> "Batterie faible"
