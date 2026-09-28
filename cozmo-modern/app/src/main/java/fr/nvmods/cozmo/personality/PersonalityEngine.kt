@@ -49,6 +49,14 @@ class PersonalityEngine(
         _state.value = _state.value.copy(mode = mode)
     }
 
+    fun reportRecoveredFault(message: String) {
+        _state.value = _state.value.copy(
+            recoveredFaults = _state.value.recoveredFaults + 1,
+            lastFault = message.take(180),
+            lastDecision = "Erreur interceptée, moteur conservé actif"
+        )
+    }
+
     suspend fun handle(event: PersonalityEvent) {
         if (!_state.value.enabled && event != PersonalityEvent.BatteryLow) return
 
