@@ -28,6 +28,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     private val connection = CozmoConnection()
@@ -113,15 +114,27 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun headUp() = manualPosition {
-        val current =
-            state.value.headAngleRad ?: CozmoConnection.HEAD_NEUTRAL_RAD
-        connection.setHeadAngle(current + HEAD_STEP_RAD)
+        val currentDeg = CozmoConnection.radToDeg(
+            state.value.headAngleRad ?: 0f
+        )
+        connection.animHead(
+            angleDeg = (currentDeg + HEAD_STEP_DEG)
+                .coerceIn(-25f, 44f)
+                .roundToInt(),
+            durationMs = 180
+        )
     }
 
     fun headDown() = manualPosition {
-        val current =
-            state.value.headAngleRad ?: CozmoConnection.HEAD_NEUTRAL_RAD
-        connection.setHeadAngle(current - HEAD_STEP_RAD)
+        val currentDeg = CozmoConnection.radToDeg(
+            state.value.headAngleRad ?: 0f
+        )
+        connection.animHead(
+            angleDeg = (currentDeg - HEAD_STEP_DEG)
+                .coerceIn(-25f, 44f)
+                .roundToInt(),
+            durationMs = 180
+        )
     }
 
     fun liftUp() = manualPosition {
@@ -591,7 +604,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val FACE_REACTION_COOLDOWN_MS = 12_000L
-        private const val HEAD_STEP_RAD = 0.14f
+        private const val HEAD_STEP_DEG = 8f
         private const val LIFT_STEP_MM = 10f
         private const val MANUAL_POSITION_HOLD_MS = 700L
         private const val PERSONALITY_ACTION_WATCHDOG_MS = 7_500L
