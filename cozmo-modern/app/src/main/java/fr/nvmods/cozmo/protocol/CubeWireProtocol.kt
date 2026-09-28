@@ -193,14 +193,14 @@ internal object CubeWireProtocol {
         ByteBuffer.allocate(5)
             .order(ByteOrder.LITTLE_ENDIAN)
             .putInt(factoryId.toInt())
-            .put(if (connect) 1 else 0)
+            .put((if (connect) 1 else 0).toByte())
             .array()
 
     fun streamObjectAccel(objectId: Long, enabled: Boolean): ByteArray =
         ByteBuffer.allocate(5)
             .order(ByteOrder.LITTLE_ENDIAN)
             .putInt(objectId.toInt())
-            .put(if (enabled) 1 else 0)
+            .put((if (enabled) 1 else 0).toByte())
             .array()
 
     fun cubeId(objectId: Long, rotationPeriodFrames: Int = 0): ByteArray =
@@ -216,7 +216,7 @@ internal object CubeWireProtocol {
 
         return ByteBuffer.allocate(40)
             .order(ByteOrder.LITTLE_ENDIAN)
-            .apply { states.forEach(::put) }
+            .apply { states.forEach { put(it) } }
             .array()
     }
 
