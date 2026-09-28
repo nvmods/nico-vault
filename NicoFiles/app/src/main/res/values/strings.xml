@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">NicoFiles</string>
-    <string name="vault_package">fr.nicovape.coffredoc</string>
-    <string name="storage_permission_title">Accès complet aux fichiers</string>
-    <string name="storage_permission_message">NicoFiles a besoin de l’autorisation « Accès à tous les fichiers » pour copier, déplacer, renommer et supprimer librement les documents du téléphone.</string>
-</resources>
