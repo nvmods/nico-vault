@@ -37,6 +37,7 @@ sealed interface PersonalityEvent {
     data object OnBack : PersonalityEvent
     data object OnFace : PersonalityEvent
     data object OnSide : PersonalityEvent
+    data object Wheelie : PersonalityEvent
     data object Falling : PersonalityEvent
     data object CliffDetected : PersonalityEvent
     data object Touched : PersonalityEvent
