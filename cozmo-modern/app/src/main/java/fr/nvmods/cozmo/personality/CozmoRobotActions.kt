@@ -8,8 +8,7 @@ import fr.nvmods.cozmo.protocol.CozmoFaceExpression
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * Adaptateur entre la personnalité et le vrai robot.
@@ -21,8 +20,6 @@ import kotlin.math.max
 class CozmoRobotActions(
     private val connection: CozmoConnection
 ) : RobotActions {
-    private var headTargetRad: Float? = null
-    private var liftTargetMm: Float? = null
 
     override suspend fun execute(action: RobotAction): ActionResult {
         if (
@@ -138,6 +135,26 @@ class CozmoRobotActions(
 
             try {
                 val known = when (name) {
+                    "hiking_intro_original" -> {
+                        playOriginalHikingIntro()
+                        true
+                    }
+
+                    "hiking_visit_edge_original" -> {
+                        playOriginalHikingDrive()
+                        true
+                    }
+
+                    "hiking_scan_original" -> {
+                        playOriginalHikingScan()
+                        true
+                    }
+
+                    "cliff_react_original" -> {
+                        playOriginalCliffReaction()
+                        true
+                    }
+
                     "greeting" -> {
                         parallelPulse(
                             head = 0.95f to 115L,
@@ -458,6 +475,8 @@ class CozmoRobotActions(
             "on_side_notice",
             "wheelie_notice",
             "wander_short",
+            "hiking_visit_edge_original",
+            "hiking_scan_original",
             "micro_scan",
             "dash_peek" -> CozmoFaceAnimation.CURIOUS
 
@@ -467,58 +486,59 @@ class CozmoRobotActions(
             "low_energy",
             "on_face_notice" -> CozmoFaceAnimation.BORED
 
-            "look_around" -> CozmoFaceAnimation.EYES_IDLE
+            "look_around",
+            "hiking_intro_original" -> CozmoFaceAnimation.EYES_IDLE
             "idle_blink" -> CozmoFaceAnimation.BLINK
 
             "fall_notice",
-            "cliff_notice" -> CozmoFaceAnimation.CLIFF
+            "cliff_notice",
+            "cliff_react_original" -> CozmoFaceAnimation.CLIFF
 
             "put_down" -> CozmoFaceAnimation.BLINK
             else -> null
         }
 
+    /**
+     * Les anciens macros de compatibilité expriment encore une intention sous
+     * forme "vitesse + durée". On la convertit en cible AnimHead ABSOLUE et on
+     * borne à la plage courante des animations Anki. Surtout, on ne cumule
+     * plus une cible artificielle d'un geste à l'autre : c'est ce qui faisait
+     * dériver la tête jusqu'en butée.
+     */
     private suspend fun headPulse(speed: Float, durationMs: Long) {
-        val sensed =
-            connection.state.value.headAngleRad ?: CozmoConnection.HEAD_NEUTRAL_RAD
-        val base = headTargetRad ?: sensed
-        val delta =
+        val sensedDeg =
+            CozmoConnection.radToDeg(
+                connection.state.value.headAngleRad
+                    ?: CozmoConnection.HEAD_NEUTRAL_RAD
+            )
+        val deltaDeg =
             speed.coerceIn(-1.5f, 1.5f) *
                 (durationMs.coerceIn(40L, 500L) / 1000f) *
-                1.15f
-        val target = (base + delta).coerceIn(
-            CozmoConnection.MIN_HEAD_ANGLE_RAD,
-            CozmoConnection.MAX_HEAD_ANGLE_RAD
-        )
+                55f
+        val targetDeg = (sensedDeg + deltaDeg)
+            .coerceIn(PERSONALITY_HEAD_MIN_DEG, PERSONALITY_HEAD_MAX_DEG)
+            .roundToInt()
 
-        headTargetRad = target
-        connection.setHeadAngle(
-            angleRad = target,
-            maxSpeedRadPerSec = max(0.9f, abs(speed) * 1.8f),
-            accelRadPerSec2 = 8f
+        connection.animHead(
+            angleDeg = targetDeg,
+            durationMs = durationMs.coerceIn(33L, 255L).toInt()
         )
-        delay(durationMs.coerceAtLeast(85L))
+        delay(durationMs.coerceAtLeast(70L))
     }
 
     private suspend fun liftPulse(speed: Float, durationMs: Long) {
-        val sensed =
-            connection.state.value.liftHeightMm ?: CozmoConnection.MIN_LIFT_HEIGHT_MM
-        val base = liftTargetMm ?: sensed
-        val deltaMm =
-            speed.coerceIn(-1.5f, 1.5f) *
-                (durationMs.coerceIn(40L, 500L) / 1000f) *
-                85f
-        val target = (base + deltaMm).coerceIn(
-            CozmoConnection.MIN_LIFT_HEIGHT_MM,
-            CozmoConnection.MAX_LIFT_HEIGHT_MM
-        )
+        val targetMm =
+            if (speed >= 0f) {
+                (32f + speed.coerceIn(0f, 1.5f) / 1.5f * 28f).roundToInt()
+            } else {
+                0
+            }
 
-        liftTargetMm = target
-        connection.setLiftHeight(
-            heightMm = target,
-            maxSpeedRadPerSec = max(0.8f, abs(speed) * 1.5f),
-            accelRadPerSec2 = 8f
+        connection.animLift(
+            heightMm = targetMm,
+            durationMs = durationMs.coerceIn(33L, 255L).toInt()
         )
-        delay(durationMs.coerceAtLeast(85L))
+        delay(durationMs.coerceAtLeast(70L))
     }
 
     private suspend fun drivePulse(
@@ -526,24 +546,13 @@ class CozmoRobotActions(
         right: Float,
         durationMs: Long
     ) {
-        val sameDirection =
-            left != 0f &&
-                right != 0f &&
-                (left > 0f) == (right > 0f)
-        val effectiveDuration =
-            if (sameDirection) {
-                durationMs.coerceAtLeast(260L)
-            } else {
-                durationMs.coerceAtLeast(105L)
-            }
-
         connection.drive(
             leftMmps = left,
             rightMmps = right,
             accelMmps2 = 260f
         )
         try {
-            delay(effectiveDuration)
+            delay(durationMs.coerceAtLeast(35L))
         } finally {
             connection.drive(
                 leftMmps = 0f,
@@ -551,7 +560,206 @@ class CozmoRobotActions(
                 accelMmps2 = 320f
             )
         }
-        delay(30)
+        delay(25)
+    }
+
+    /**
+     * Variante 01 de HikingIntro, décodée directement de
+     * anim_hiking_getin_01.bin de l'OBB 3.6.6.
+     */
+    private suspend fun playOriginalHikingIntro() {
+        playOriginalClip(
+            head = listOf(
+                HeadFrame(0, 33, 0),
+                HeadFrame(198, 132, 0),
+                HeadFrame(330, 99, -7),
+                HeadFrame(429, 33, -8),
+                HeadFrame(462, 33, -8),
+                HeadFrame(495, 33, -8),
+                HeadFrame(528, 99, 5),
+                HeadFrame(627, 33, 6),
+                HeadFrame(660, 165, 1),
+                HeadFrame(825, 66, 0),
+                HeadFrame(891, 66, 0),
+                HeadFrame(957, 99, 0)
+            ),
+            lift = listOf(
+                LiftFrame(0, 33, 0),
+                LiftFrame(330, 99, 38),
+                LiftFrame(429, 132, 0)
+            ),
+            body = listOf(
+                BodyFrame(363, 66, 44f),
+                BodyFrame(990, 132, -3f)
+            )
+        )
+    }
+
+    /**
+     * Fallback de navigation Hiking quand on ne dispose pas encore du memory
+     * map/path planner propriétaire. La vitesse d'approche (50 mm/s) vient de
+     * Hiking_VisitInterestingEdge et l'animation de tête vient du vrai
+     * HikingDrivingStart. Le déplacement est CONTINU, plus une rafale de bonds.
+     */
+    private suspend fun playOriginalHikingDrive() = coroutineScope {
+        val headJob = launch {
+            playOriginalClip(
+                head = listOf(
+                    HeadFrame(0, 231, -12),
+                    HeadFrame(924, 165, -7),
+                    HeadFrame(3300, 231, -12),
+                    HeadFrame(3564, 99, -7)
+                )
+            )
+        }
+
+        connection.drive(
+            leftMmps = HIKING_APPROACH_SPEED_MMP_S,
+            rightMmps = HIKING_APPROACH_SPEED_MMP_S,
+            accelMmps2 = 100f
+        )
+
+        try {
+            var elapsed = 0L
+            while (elapsed < HIKING_DRIVE_MS) {
+                if (connection.state.value.cliffDetected) break
+                delay(25)
+                elapsed += 25
+            }
+        } finally {
+            connection.drive(0f, 0f, 180f)
+            headJob.cancel()
+        }
+
+        connection.animHead(-8, 99)
+        delay(110)
+    }
+
+    /**
+     * Paramètres issus de Hiking_LookInPlaceForUnknown :
+     * corps 180°/s, tête 90°/s, tête basse -15..-10° puis -5..+5°.
+     */
+    private suspend fun playOriginalHikingScan() {
+        connection.animHead(-12, 165)
+        turnInPlaceForDegrees(25f, clockwise = true)
+        connection.animHead(0, 165)
+        delay(260)
+        turnInPlaceForDegrees(35f, clockwise = false)
+        connection.animHead(-15, 165)
+        delay(220)
+    }
+
+    /**
+     * Réaction Cliff reconstruite depuis la 3.6.6 :
+     * - anim_reacttocliff_huh_01 pour la première surprise ;
+     * - BehaviorReactToCliff::TransitionToBackingUp() du binaire natif :
+     *   DriveStraightAction(-60 mm, 100 mm/s, true).
+     */
+    private suspend fun playOriginalCliffReaction() {
+        connection.stopAllMotors()
+
+        playOriginalClip(
+            head = listOf(
+                HeadFrame(0, 66, -19),
+                HeadFrame(66, 66, -1),
+                HeadFrame(132, 66, 5),
+                HeadFrame(198, 66, 0),
+                HeadFrame(264, 33, -18),
+                HeadFrame(297, 165, -19)
+            ),
+            lift = listOf(
+                LiftFrame(0, 66, 48),
+                LiftFrame(66, 99, 0)
+            ),
+            body = listOf(
+                BodyFrame(0, 165, -117f),
+                BodyFrame(165, 165, 7f)
+            )
+        )
+
+        // Étape native TransitionToBackingUp : -60 mm à 100 mm/s.
+        connection.drive(-100f, -100f, 260f)
+        try {
+            delay(600)
+        } finally {
+            connection.drive(0f, 0f, 320f)
+        }
+
+        connection.animLift(0, 99)
+        connection.animHead(-8, 132)
+        delay(150)
+    }
+
+    private suspend fun turnInPlaceForDegrees(
+        degrees: Float,
+        clockwise: Boolean
+    ) {
+        // TRACK_WIDTH officiel PyCozmo = 45 mm.
+        // 180°/s => v = omega * demi-voie = PI * 22.5 ~= 70.7 mm/s.
+        val speed = if (clockwise) HIKING_TURN_WHEEL_MMP_S else -HIKING_TURN_WHEEL_MMP_S
+        val duration =
+            ((degrees.coerceAtLeast(1f) / HIKING_BODY_TURN_DEG_PER_SEC) * 1000f)
+                .roundToInt()
+                .toLong()
+
+        drivePulse(speed, -speed, duration)
+    }
+
+    private suspend fun playOriginalClip(
+        head: List<HeadFrame> = emptyList(),
+        lift: List<LiftFrame> = emptyList(),
+        body: List<BodyFrame> = emptyList()
+    ) = coroutineScope {
+        head.forEach { frame ->
+            launch {
+                delay(frame.atMs.toLong())
+                connection.animHead(frame.angleDeg, frame.durationMs)
+            }
+        }
+        lift.forEach { frame ->
+            launch {
+                delay(frame.atMs.toLong())
+                connection.animLift(frame.heightMm, frame.durationMs)
+            }
+        }
+        body.forEach { frame ->
+            launch {
+                delay(frame.atMs.toLong())
+                connection.drive(frame.speedMmps, frame.speedMmps, 300f)
+                try {
+                    delay(frame.durationMs.toLong())
+                } finally {
+                    connection.drive(0f, 0f, 300f)
+                }
+            }
+        }
+    }
+
+    private data class HeadFrame(
+        val atMs: Int,
+        val durationMs: Int,
+        val angleDeg: Int
+    )
+
+    private data class LiftFrame(
+        val atMs: Int,
+        val durationMs: Int,
+        val heightMm: Int
+    )
+
+    private data class BodyFrame(
+        val atMs: Int,
+        val durationMs: Int,
+        val speedMmps: Float
+    )
+
+    companion object {
+        private const val PERSONALITY_HEAD_MIN_DEG = -20f
+        private const val PERSONALITY_HEAD_MAX_DEG = 30f
+        private const val HIKING_APPROACH_SPEED_MMP_S = 50f
+        private const val HIKING_DRIVE_MS = 3_650L
+        private const val HIKING_BODY_TURN_DEG_PER_SEC = 180f
+        private const val HIKING_TURN_WHEEL_MMP_S = 70.7f
     }
 
     private fun PersonalityLight.toBackpack(): BackpackColor =
