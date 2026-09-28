@@ -25,6 +25,7 @@ class PersonalityEngine(
     val log: StateFlow<List<PersonalityLogEntry>> = _log.asStateFlow()
 
     private var lastAutonomousDecisionMs = 0L
+    private var lastCubeMotionReactionMs = 0L
 
     fun start() {
         _state.value = _state.value.copy(
@@ -93,6 +94,18 @@ class PersonalityEngine(
                 curiosity = (current.curiosity + 0.14f).unit(),
                 cubeVisible = true,
                 lastStimulus = event.cubeId?.let { "Cube $it détecté" } ?: "Cube détecté"
+            )
+
+            is PersonalityEvent.CubeTapped -> current.copy(
+                happiness = (current.happiness + 0.08f).unit(),
+                curiosity = (current.curiosity + 0.05f).unit(),
+                interactions = current.interactions + 1,
+                lastStimulus = "Cube ${event.cubeId} tapé"
+            )
+
+            is PersonalityEvent.CubeMoved -> current.copy(
+                curiosity = (current.curiosity + 0.06f).unit(),
+                lastStimulus = "Cube ${event.cubeId} déplacé"
             )
 
             PersonalityEvent.CubeLost -> current.copy(
@@ -170,6 +183,27 @@ class PersonalityEngine(
                 RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
                 RobotAction.PlayAnimation("cube_interest")
             )
+
+            is PersonalityEvent.CubeTapped -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
+                RobotAction.CubeLight(event.cubeId, PersonalityLight.GREEN),
+                RobotAction.MoveHead(-0.35f, 120),
+                RobotAction.Wait(120),
+                RobotAction.MoveHead(0.35f, 120),
+                RobotAction.CubeLight(event.cubeId, PersonalityLight.BLUE)
+            )
+
+            is PersonalityEvent.CubeMoved -> {
+                if (now - lastCubeMotionReactionMs < 2_500L) {
+                    emptyList()
+                } else {
+                    lastCubeMotionReactionMs = now
+                    listOf(
+                        RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                        RobotAction.MoveHead(-0.35f, 140)
+                    )
+                }
+            }
 
             PersonalityEvent.PickedUp -> listOf(
                 RobotAction.Stop,
@@ -267,6 +301,8 @@ class PersonalityEngine(
     ): String = when (event) {
         is PersonalityEvent.FaceDetected -> "Saluer la personne"
         is PersonalityEvent.CubeDetected -> "Observer le cube"
+        is PersonalityEvent.CubeTapped -> "Réagir au tap du cube"
+        is PersonalityEvent.CubeMoved -> "Suivre le mouvement du cube"
         PersonalityEvent.PickedUp -> "Réagir au soulèvement"
         PersonalityEvent.PutDown -> "Réagir au retour au sol"
         PersonalityEvent.Touched -> "Réagir au contact"
@@ -283,6 +319,12 @@ class PersonalityEngine(
 
         is PersonalityEvent.CubeDetected ->
             event.cubeId?.let { "Cube détecté : $it" } ?: "Cube détecté"
+
+        is PersonalityEvent.CubeTapped ->
+            "Cube tapé : ${event.cubeId}" +
+                (event.intensity?.let { " (intensité $it)" } ?: "")
+
+        is PersonalityEvent.CubeMoved -> "Cube déplacé : ${event.cubeId}"
 
         PersonalityEvent.CubeLost -> "Cube perdu"
         PersonalityEvent.PickedUp -> "Soulevé"
