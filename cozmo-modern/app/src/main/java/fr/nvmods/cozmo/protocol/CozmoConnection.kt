@@ -241,10 +241,19 @@ class CozmoConnection {
         scope.cancel()
     }
 
-    fun drive(leftMmps: Float, rightMmps: Float) {
+    fun drive(
+        leftMmps: Float,
+        rightMmps: Float,
+        accelMmps2: Float = 0f
+    ) {
         sendCommand(
             0x32,
-            CozmoProtocol.leFloats(leftMmps, rightMmps, 0f, 0f)
+            CozmoProtocol.leFloats(
+                leftMmps,
+                rightMmps,
+                accelMmps2,
+                accelMmps2
+            )
         )
     }
 
@@ -256,6 +265,48 @@ class CozmoConnection {
 
     fun moveLift(speedRadPerSec: Float) {
         sendCommand(0x34, CozmoProtocol.leFloats(speedRadPerSec))
+    }
+
+    /**
+     * Position absolue de la tête, protocole natif Cozmo SetHeadAngle (0x37).
+     * Contrairement à MoveHead (0x35), la commande s'arrête d'elle-même à la
+     * cible et ne dépend donc pas d'un STOP temporisé.
+     */
+    fun setHeadAngle(
+        angleRad: Float,
+        maxSpeedRadPerSec: Float = 2.2f,
+        accelRadPerSec2: Float = 8f,
+        durationSec: Float = 0f
+    ) {
+        val payload = ByteBuffer.allocate(17)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putFloat(angleRad.coerceIn(MIN_HEAD_ANGLE_RAD, MAX_HEAD_ANGLE_RAD))
+            .putFloat(maxSpeedRadPerSec.coerceIn(0.2f, 15f))
+            .putFloat(accelRadPerSec2.coerceIn(0.5f, 30f))
+            .putFloat(durationSec.coerceAtLeast(0f))
+            .put(0)
+            .array()
+        sendCommand(0x37, payload)
+    }
+
+    /**
+     * Position absolue du lift, protocole natif Cozmo SetLiftHeight (0x36).
+     */
+    fun setLiftHeight(
+        heightMm: Float,
+        maxSpeedRadPerSec: Float = 2.0f,
+        accelRadPerSec2: Float = 8f,
+        durationSec: Float = 0f
+    ) {
+        val payload = ByteBuffer.allocate(17)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putFloat(heightMm.coerceIn(MIN_LIFT_HEIGHT_MM, MAX_LIFT_HEIGHT_MM))
+            .putFloat(maxSpeedRadPerSec.coerceIn(0.2f, 3f))
+            .putFloat(accelRadPerSec2.coerceIn(0.5f, 30f))
+            .putFloat(durationSec.coerceAtLeast(0f))
+            .put(0)
+            .array()
+        sendCommand(0x36, payload)
     }
 
     fun setHeadLight(enabled: Boolean) {
@@ -570,6 +621,12 @@ class CozmoConnection {
         )
 
         _state.value = _state.value.copy(connection = ConnectionState.READY)
+
+        // Position de repos stable à l'initialisation : tête au milieu de sa
+        // course, lift en bas. On utilise les vraies consignes de position,
+        // jamais une impulsion de vitesse qui pourrait finir en butée.
+        setHeadAngle(HEAD_NEUTRAL_RAD, maxSpeedRadPerSec = 1.8f)
+        setLiftHeight(MIN_LIFT_HEIGHT_MM, maxSpeedRadPerSec = 1.4f)
         setFaceExpression(CozmoFaceExpression.NEUTRAL)
     }
 
@@ -870,6 +927,12 @@ class CozmoConnection {
         private const val FACE_REFRESH_MS = 4_000L
         private const val HANDSHAKE_WARNING_MS = 6_000L
         private const val AUDIO_FRAME_RATE = 30L
+
+        const val MIN_HEAD_ANGLE_RAD = -0.43633232f   // -25°
+        const val MAX_HEAD_ANGLE_RAD = 0.7766715f    // +44.5°
+        const val HEAD_NEUTRAL_RAD = 0.1701696f      // +9.75°
+        const val MIN_LIFT_HEIGHT_MM = 32f
+        const val MAX_LIFT_HEIGHT_MM = 92f
         private const val GRAVITY_AXIS_RATIO = 0.70f
 
         /**
