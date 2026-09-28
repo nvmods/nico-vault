@@ -412,7 +412,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         val oldOrientation = previousOrientation
 
         if (
-            oldCliff == false &&
+            oldCliff != true &&
             robotState.cliffDetected
         ) {
             // Double sécurité : le body a aussi EnableStopOnCliff actif.
@@ -439,8 +439,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (
-                oldCliff != null &&
-                !oldCliff &&
+                oldCliff != true &&
                 robotState.cliffDetected
             ) {
                 dispatchPersonality(PersonalityEvent.CliffDetected)
