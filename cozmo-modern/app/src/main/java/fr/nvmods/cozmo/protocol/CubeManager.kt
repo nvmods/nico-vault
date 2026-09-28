@@ -108,9 +108,13 @@ internal class CubeManager(
             managerJob?.cancel()
             managerJob = null
 
-            // Ne pas piloter SetAccessoryDiscovery (0x0a) ici.
-            // Les implémentations de référence reçoivent ObjectAvailable
-            // spontanément et ne basculent pas la radio BLE entre les connexions.
+            // S'assurer qu'une fenêtre de découverte BLE ne reste jamais
+            // active après désactivation de la gestion des cubes.
+            sendCommand(
+                CubeWireProtocol.CMD_SET_ACCESSORY_DISCOVERY,
+                byteArrayOf(0)
+            )
+
             synchronized(lock) {
                 connectingFactoryId = null
             }
@@ -565,19 +569,44 @@ internal class CubeManager(
 
         managerJob = scope.launch {
             while (discoveryEnabled) {
-                // Le body annonce périodiquement les accessoires par
-                // ObjectAvailable. On ne force plus aucun cycle de scan radio.
-                // On se contente de connecter, un par un, les cubes fraîchement
-                // annoncés et non déjà liés.
+                // Priorité 1 : connecter/reconnecter un cube déjà connu.
+                // SetPropSlot cible directement son factory_id et son slot,
+                // aucun scan radio n'est nécessaire pour une reconnexion.
                 val candidate = chooseConnectCandidate()
 
                 if (candidate != null) {
                     attemptConnect(candidate)
                     delay(BETWEEN_CONNECTS_MS)
+                    continue
+                }
+
+                // Priorité 2 : tant que les 3 LightCubes physiques n'ont pas
+                // encore été vus, ouvrir une courte fenêtre de découverte BLE.
+                // Dès que les 3 factory_id sont connus, on ne rescannera plus
+                // automatiquement : les connexions existantes restent stables.
+                if (knownCubeCount() < TARGET_CUBE_COUNT) {
+                    performDiscoveryWindow()
                 } else {
                     delay(IDLE_CONNECT_POLL_MS)
                 }
             }
+        }
+    }
+
+    private suspend fun performDiscoveryWindow() {
+        sendCommand(
+            CubeWireProtocol.CMD_SET_ACCESSORY_DISCOVERY,
+            byteArrayOf(1)
+        )
+
+        delay(DISCOVERY_WINDOW_MS)
+
+        if (discoveryEnabled) {
+            sendCommand(
+                CubeWireProtocol.CMD_SET_ACCESSORY_DISCOVERY,
+                byteArrayOf(0)
+            )
+            delay(AFTER_DISCOVERY_SETTLE_MS)
         }
     }
 
@@ -664,9 +693,7 @@ internal class CubeManager(
                     !it.connected &&
                         it.objectType in 1..3 &&
                         (it.propSlot ?: slotForObjectType(it.objectType)) in 0..4 &&
-                        now >= (nextConnectAllowedNanos[it.factoryId] ?: 0L) &&
-                        now - (lastSeenNanos[it.factoryId] ?: 0L) <
-                            AVAILABLE_MAX_AGE_NS
+                        now >= (nextConnectAllowedNanos[it.factoryId] ?: 0L)
                 }
                 .sortedWith(
                     compareBy<CubeInfo> { it.connectAttempts }
@@ -675,6 +702,12 @@ internal class CubeManager(
                 .firstOrNull()
         }
     }
+
+    private fun knownCubeCount(): Int =
+        synchronized(lock) {
+            cubesByFactory.values
+                .count { it.objectType in 1..3 }
+        }
 
     private fun connectedFactoryIds(): List<Long> =
         synchronized(lock) {
@@ -769,11 +802,11 @@ internal class CubeManager(
     companion object {
         private const val CONNECT_TIMEOUT_MS = 2_500L
         private const val BETWEEN_CONNECTS_MS = 220L
-        private const val AVAILABLE_MAX_AGE_NS = 8_000_000_000L
         private const val RECONNECT_BACKOFF_NS = 3_000_000_000L
 
-        // Le manager ne pilote plus la découverte radio : il attend les
-        // ObjectAvailable spontanés du body et ne gère que les connexions.
+        private const val TARGET_CUBE_COUNT = 3
+        private const val DISCOVERY_WINDOW_MS = 1_800L
+        private const val AFTER_DISCOVERY_SETTLE_MS = 180L
         private const val IDLE_CONNECT_POLL_MS = 250L
         // Le RSSI sert au diagnostic, pas au pilotage : 2 Hz suffit et évite
         // de republier toute la liste à chaque publicité BLE reçue.
