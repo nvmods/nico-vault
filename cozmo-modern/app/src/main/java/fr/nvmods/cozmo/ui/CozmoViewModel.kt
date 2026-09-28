@@ -8,6 +8,7 @@ import fr.nvmods.cozmo.protocol.BackpackColor
 import fr.nvmods.cozmo.protocol.CozmoConnection
 import fr.nvmods.cozmo.protocol.CozmoState
 import fr.nvmods.cozmo.protocol.CubeInfo
+import fr.nvmods.cozmo.protocol.ChassisOrientation
 import fr.nvmods.cozmo.personality.CozmoRobotActions
 import fr.nvmods.cozmo.personality.PersonalityEngine
 import fr.nvmods.cozmo.personality.PersonalityEvent
@@ -32,6 +33,10 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     private var personalityActionJob: Job? = null
     private var manualMotionActive = false
     private var previousCubes: Map<Long, CubeInfo> = emptyMap()
+    private var previousPickedUp: Boolean? = null
+    private var previousFalling: Boolean? = null
+    private var previousCliffDetected: Boolean? = null
+    private var previousOrientation: ChassisOrientation? = null
 
     val state: StateFlow<CozmoState> = connection.state
     val personalityState = personality.state
@@ -173,6 +178,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         personality.start()
+        dispatchCurrentChassisState()
 
         personalityTickerJob?.cancel()
         personalityTickerJob = viewModelScope.launch {
@@ -221,6 +227,29 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     fun personalityBatteryLow() =
         dispatchPersonality(PersonalityEvent.BatteryLow)
 
+    private fun dispatchCurrentChassisState() {
+        if (!personality.state.value.enabled || manualMotionActive) return
+
+        val current = state.value
+
+        when {
+            current.pickedUp -> dispatchPersonality(PersonalityEvent.PickedUp)
+            current.falling -> dispatchPersonality(PersonalityEvent.Falling)
+            current.cliffDetected -> dispatchPersonality(PersonalityEvent.CliffDetected)
+            current.chassisOrientation == ChassisOrientation.ON_BACK ->
+                dispatchPersonality(PersonalityEvent.OnBack)
+
+            current.chassisOrientation == ChassisOrientation.ON_FACE ->
+                dispatchPersonality(PersonalityEvent.OnFace)
+
+            current.chassisOrientation == ChassisOrientation.ON_LEFT_SIDE ||
+                current.chassisOrientation == ChassisOrientation.ON_RIGHT_SIDE ->
+                dispatchPersonality(PersonalityEvent.OnSide)
+
+            else -> Unit
+        }
+    }
+
     private fun manualMotion(action: () -> Unit) {
         personalityActionJob?.cancel()
         personalityActionJob = null
@@ -248,7 +277,64 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeRobotState(robotState: CozmoState) {
         val current = robotState.cubes.associateBy { it.factoryId }
 
+        val oldPickedUp = previousPickedUp
+        val oldFalling = previousFalling
+        val oldCliff = previousCliffDetected
+        val oldOrientation = previousOrientation
+
+        if (
+            oldCliff == false &&
+            robotState.cliffDetected
+        ) {
+            // Double sécurité : le body a aussi EnableStopOnCliff actif.
+            connection.stopAllMotors()
+        }
+
         if (personality.state.value.enabled && !manualMotionActive) {
+            if (oldPickedUp != null && oldPickedUp != robotState.pickedUp) {
+                dispatchPersonality(
+                    if (robotState.pickedUp) {
+                        PersonalityEvent.PickedUp
+                    } else {
+                        PersonalityEvent.PutDown
+                    }
+                )
+            }
+
+            if (
+                oldFalling != null &&
+                !oldFalling &&
+                robotState.falling
+            ) {
+                dispatchPersonality(PersonalityEvent.Falling)
+            }
+
+            if (
+                oldCliff != null &&
+                !oldCliff &&
+                robotState.cliffDetected
+            ) {
+                dispatchPersonality(PersonalityEvent.CliffDetected)
+            }
+
+            if (
+                oldOrientation != null &&
+                oldOrientation != robotState.chassisOrientation
+            ) {
+                when (robotState.chassisOrientation) {
+                    ChassisOrientation.ON_BACK ->
+                        dispatchPersonality(PersonalityEvent.OnBack)
+
+                    ChassisOrientation.ON_FACE ->
+                        dispatchPersonality(PersonalityEvent.OnFace)
+
+                    ChassisOrientation.ON_LEFT_SIDE,
+                    ChassisOrientation.ON_RIGHT_SIDE ->
+                        dispatchPersonality(PersonalityEvent.OnSide)
+
+                    ChassisOrientation.ON_THREADS -> Unit
+                }
+            }
             val hadConnectedCube = previousCubes.values.any { it.connected }
             val hasConnectedCube = current.values.any { it.connected }
 
@@ -282,6 +368,10 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         previousCubes = current
+        previousPickedUp = robotState.pickedUp
+        previousFalling = robotState.falling
+        previousCliffDetected = robotState.cliffDetected
+        previousOrientation = robotState.chassisOrientation
     }
 
     fun speak(text: String, french: Boolean, pitch: Float, rate: Float) {
