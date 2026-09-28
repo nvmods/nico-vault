@@ -330,6 +330,12 @@ class PersonalityEngine(
                 currentOriginalDecision = original
                 return original.actions
             }
+
+            // Avec un profil original chargé, "aucune décision maintenant"
+            // signifie réellement attendre. Ne surtout pas retomber sur le
+            // vieux moteur de micro-mouvements à chaque tick : il court-circuitait
+            // les durées/cooldowns Anki et surchargeait le transport.
+            return emptyList()
         }
 
         return when (event) {
@@ -459,7 +465,8 @@ class PersonalityEngine(
                 RobotAction.Stop,
                 RobotAction.PlaySound(PersonalitySoundCue.CLIFF),
                 RobotAction.Backpack(PersonalityLight.RED),
-                RobotAction.PlayAnimation("cliff_notice")
+                RobotAction.PlayAnimation("cliff_react_original"),
+                RobotAction.Backpack(PersonalityLight.OFF)
             )
 
             PersonalityEvent.Touched -> listOf(
