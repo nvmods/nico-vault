@@ -94,6 +94,11 @@ class PersonalityEngine(
                 lastStimulus = event.name?.let { "Visage : $it" } ?: "Visage détecté"
             )
 
+            PersonalityEvent.FaceLost -> current.copy(
+                knownFaceVisible = false,
+                lastStimulus = "Visage perdu"
+            )
+
             is PersonalityEvent.CubeDetected -> current.copy(
                 curiosity = (current.curiosity + 0.14f).unit(),
                 cubeVisible = true,
@@ -215,6 +220,8 @@ class PersonalityEngine(
                 RobotAction.PlayAnimation("greeting"),
                 RobotAction.Backpack(PersonalityLight.BLUE)
             )
+
+            PersonalityEvent.FaceLost -> emptyList()
 
             is PersonalityEvent.CubeDetected -> listOf(
                 RobotAction.MoveHead(-0.6f, 180),
@@ -471,6 +478,7 @@ class PersonalityEngine(
         actions: List<RobotAction>
     ): String = when (event) {
         is PersonalityEvent.FaceDetected -> "Saluer la personne"
+        PersonalityEvent.FaceLost -> "Continuer son activité"
         is PersonalityEvent.CubeDetected -> "S'intéresser au cube"
         is PersonalityEvent.CubeTapped -> "Réagir au tap du cube"
         is PersonalityEvent.CubeMoved -> "Suivre le mouvement du cube"
@@ -493,6 +501,8 @@ class PersonalityEngine(
     private fun describeEvent(event: PersonalityEvent): String = when (event) {
         is PersonalityEvent.FaceDetected ->
             event.name?.let { "Visage détecté : $it" } ?: "Visage détecté"
+
+        PersonalityEvent.FaceLost -> "Visage perdu"
 
         is PersonalityEvent.CubeDetected ->
             event.cubeId?.let { "Cube détecté : $it" } ?: "Cube détecté"
