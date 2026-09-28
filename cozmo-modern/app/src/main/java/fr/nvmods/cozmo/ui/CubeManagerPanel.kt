@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.nvmods.cozmo.protocol.BackpackColor
+import fr.nvmods.cozmo.protocol.ConnectionState
 import fr.nvmods.cozmo.protocol.CozmoState
 import fr.nvmods.cozmo.protocol.CubeInfo
 
@@ -39,8 +40,16 @@ internal fun CubeManagerPanel(
             ToggleLine(
                 label = "Connexion automatique des cubes",
                 checked = state.cubeDiscovery,
+                enabled = state.connection == ConnectionState.READY,
                 onChanged = vm::discoverCubes
             )
+
+            if (state.connection != ConnectionState.READY) {
+                Text(
+                    "Connexion cubes verrouillée tant que Cozmo n'est pas READY.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
 
             val known = state.cubes
             val connected = known.filter {
