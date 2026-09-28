@@ -13,6 +13,8 @@ import fr.nvmods.cozmo.personality.CozmoRobotActions
 import fr.nvmods.cozmo.personality.PersonalityEngine
 import fr.nvmods.cozmo.personality.PersonalityEvent
 import fr.nvmods.cozmo.personality.PersonalityMode
+import fr.nvmods.cozmo.vision.CozmoFaceDetector
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 class CozmoViewModel(application: Application) : AndroidViewModel(application) {
@@ -29,7 +32,9 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     private val personalityRobot = CozmoRobotActions(connection)
     private val personality = PersonalityEngine(personalityRobot)
+    private val faceDetector = CozmoFaceDetector()
     private var personalityTickerJob: Job? = null
+    private var faceDetectionJob: Job? = null
     private var personalityActionJob: Job? = null
     private var manualMotionActive = false
     private var previousCubes: Map<Long, CubeInfo> = emptyMap()
@@ -37,6 +42,9 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     private var previousFalling: Boolean? = null
     private var previousCliffDetected: Boolean? = null
     private var previousOrientation: ChassisOrientation? = null
+    private var personalityOwnsCamera = false
+    private var previousFacePresent = false
+    private var lastFaceReactionMs = 0L
 
     val state: StateFlow<CozmoState> = connection.state
     val personalityState = personality.state
@@ -102,7 +110,11 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun headLight(enabled: Boolean) = connection.setHeadLight(enabled)
 
-    fun camera(enabled: Boolean) = connection.enableCamera(enabled)
+    fun camera(enabled: Boolean) {
+        // Une action manuelle rend la caméra à l'utilisateur.
+        personalityOwnsCamera = false
+        connection.enableCamera(enabled)
+    }
 
     fun discoverCubes(enabled: Boolean) = connection.setAccessoryDiscovery(enabled)
 
@@ -169,6 +181,15 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         if (!enabled) {
             personalityTickerJob?.cancel()
             personalityTickerJob = null
+            faceDetectionJob?.cancel()
+            faceDetectionJob = null
+            previousFacePresent = false
+
+            if (personalityOwnsCamera) {
+                connection.enableCamera(false)
+                personalityOwnsCamera = false
+            }
+
             val hadAutonomousMotion = !manualMotionActive
             personality.stop()
             if (hadAutonomousMotion) {
@@ -180,10 +201,20 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         personality.start()
         dispatchCurrentChassisState()
 
+        // La personnalité a besoin de voir pour réagir spontanément à une
+        // personne. On n'éteindra la caméra à l'arrêt que si c'est elle qui
+        // l'a activée.
+        if (!state.value.cameraEnabled) {
+            personalityOwnsCamera = true
+            connection.enableCamera(true)
+        }
+
+        startFaceDetection()
+
         personalityTickerJob?.cancel()
         personalityTickerJob = viewModelScope.launch {
             while (isActive) {
-                delay(1_500)
+                delay(1_000)
 
                 if (
                     personality.state.value.enabled &&
@@ -245,6 +276,9 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
             current.chassisOrientation == ChassisOrientation.ON_LEFT_SIDE ||
                 current.chassisOrientation == ChassisOrientation.ON_RIGHT_SIDE ->
                 dispatchPersonality(PersonalityEvent.OnSide)
+
+            current.chassisOrientation == ChassisOrientation.WHEELIE ->
+                dispatchPersonality(PersonalityEvent.Wheelie)
 
             else -> Unit
         }
@@ -332,6 +366,9 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
                     ChassisOrientation.ON_RIGHT_SIDE ->
                         dispatchPersonality(PersonalityEvent.OnSide)
 
+                    ChassisOrientation.WHEELIE ->
+                        dispatchPersonality(PersonalityEvent.Wheelie)
+
                     ChassisOrientation.ON_THREADS -> Unit
                 }
             }
@@ -374,6 +411,53 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         previousOrientation = robotState.chassisOrientation
     }
 
+    private fun startFaceDetection() {
+        faceDetectionJob?.cancel()
+        previousFacePresent = false
+
+        faceDetectionJob = viewModelScope.launch {
+            var lastAnalyzedFrame = -1L
+
+            while (isActive && personality.state.value.enabled) {
+                delay(450)
+
+                val snapshot = state.value
+                val bitmap = snapshot.cameraBitmap ?: continue
+
+                if (snapshot.cameraFrames == lastAnalyzedFrame) {
+                    continue
+                }
+                lastAnalyzedFrame = snapshot.cameraFrames
+
+                val count = withContext(Dispatchers.Default) {
+                    faceDetector.detectFaceCount(bitmap)
+                }
+                val facePresent = count > 0
+                val now = System.currentTimeMillis()
+
+                if (facePresent) {
+                    val mayReactAgain =
+                        now - lastFaceReactionMs >= FACE_REACTION_COOLDOWN_MS
+
+                    if (!previousFacePresent || mayReactAgain) {
+                        lastFaceReactionMs = now
+                        dispatchPersonality(
+                            PersonalityEvent.FaceDetected(),
+                            interruptCurrent = false
+                        )
+                    }
+                } else if (previousFacePresent) {
+                    dispatchPersonality(
+                        PersonalityEvent.FaceLost,
+                        interruptCurrent = false
+                    )
+                }
+
+                previousFacePresent = facePresent
+            }
+        }
+    }
+
     fun speak(text: String, french: Boolean, pitch: Float, rate: Float) {
         if (text.isBlank()) return
 
@@ -411,8 +495,13 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    companion object {
+        private const val FACE_REACTION_COOLDOWN_MS = 12_000L
+    }
+
     override fun onCleared() {
         personalityTickerJob?.cancel()
+        faceDetectionJob?.cancel()
         personalityActionJob?.cancel()
         personality.stop()
         speech.shutdown()
