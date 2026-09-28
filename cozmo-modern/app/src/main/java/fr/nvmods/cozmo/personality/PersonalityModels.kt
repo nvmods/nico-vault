@@ -20,7 +20,9 @@ data class PersonalityState(
     val interactions: Long = 0,
     val idleTicks: Long = 0,
     val lastStimulus: String = "Aucun",
-    val lastDecision: String = "En attente"
+    val lastDecision: String = "En attente",
+    val recoveredFaults: Long = 0,
+    val lastFault: String? = null
 )
 
 sealed interface PersonalityEvent {
@@ -108,6 +110,16 @@ sealed interface RobotAction {
         val light: PersonalityLight
     ) : RobotAction
     data class PlayAnimation(val name: String) : RobotAction
+
+    /**
+     * Animation + vocalise lancées ensemble, plus proche des clips Anki où
+     * visage, moteurs et audio évoluent en parallèle.
+     */
+    data class Express(
+        val name: String,
+        val cue: PersonalitySoundCue? = null
+    ) : RobotAction
+
     data class PlaySound(val cue: PersonalitySoundCue) : RobotAction
     data class Speak(val text: String) : RobotAction
     data class Wait(val durationMs: Long) : RobotAction
