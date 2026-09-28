@@ -18,7 +18,8 @@ import kotlin.random.Random
 class PersonalityEngine(
     private val robot: RobotActions,
     private val clockMs: () -> Long = System::currentTimeMillis,
-    private val random: Random = Random.Default
+    private val random: Random = Random.Default,
+    private val originalProfile: OriginalBehaviorProfile = OriginalBehaviorProfile.fallback()
 ) {
     private val _state = MutableStateFlow(PersonalityState())
     val state: StateFlow<PersonalityState> = _state.asStateFlow()
@@ -28,12 +29,15 @@ class PersonalityEngine(
 
     private var lastAutonomousDecisionMs = 0L
     private var lastCubeMotionReactionMs = 0L
+    private val originalScheduler = OriginalBehaviorScheduler(originalProfile, random)
+    private var currentOriginalDecision: OriginalBehaviorDecision? = null
 
     fun start() {
         _state.value = _state.value.copy(
             enabled = true,
             lastStimulus = "Moteur démarré",
-            lastDecision = "Observation"
+            lastDecision = "Observation",
+            behaviorSource = originalProfile.source
         )
     }
 
@@ -63,6 +67,7 @@ class PersonalityEngine(
         val now = clockMs()
         val before = _state.value
         var next = evolve(before, event)
+        currentOriginalDecision = null
         val actions = decide(next, event, now)
 
         if (actions.isEmpty()) {
@@ -72,8 +77,16 @@ class PersonalityEngine(
             return
         }
 
-        val decision = describeDecision(event, actions)
-        next = next.copy(lastDecision = decision)
+        val originalDecision = currentOriginalDecision
+        val decision = originalDecision?.let {
+            OriginalBehaviorLabels.behavior(it.behaviorId)
+        } ?: describeDecision(event, actions)
+        next = next.copy(
+            lastDecision = decision,
+            originalActivity = originalDecision?.activityId ?: next.originalActivity,
+            originalBehavior = originalDecision?.behaviorId ?: next.originalBehavior,
+            behaviorSource = originalProfile.source
+        )
         _state.value = next
 
         val executed = mutableListOf<RobotAction>()
@@ -295,6 +308,30 @@ class PersonalityEngine(
         event: PersonalityEvent,
         now: Long
     ): List<RobotAction> {
+        if (
+            event is PersonalityEvent.CubeMoved &&
+            now - lastCubeMotionReactionMs < 1_800L
+        ) {
+            return emptyList()
+        }
+
+        originalReactionTrigger(event)?.let { trigger ->
+            if (event is PersonalityEvent.CubeMoved) {
+                lastCubeMotionReactionMs = now
+            }
+            originalScheduler.reaction(trigger, state, now)?.let { original ->
+                currentOriginalDecision = original
+                return original.actions
+            }
+        }
+
+        if (event == PersonalityEvent.IdleTick) {
+            originalScheduler.idle(state, now)?.let { original ->
+                currentOriginalDecision = original
+                return original.actions
+            }
+        }
+
         return when (event) {
             is PersonalityEvent.FaceDetected -> listOf(
                 RobotAction.Stop,
@@ -345,11 +382,8 @@ class PersonalityEngine(
             }
 
             is PersonalityEvent.CubeMoved -> {
-                if (now - lastCubeMotionReactionMs < 1_800L) {
-                    emptyList()
-                } else {
-                    lastCubeMotionReactionMs = now
-                    when (random.nextInt(3)) {
+                lastCubeMotionReactionMs = now
+                when (random.nextInt(3)) {
                         0 -> listOf(
                             RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
                             RobotAction.PlayAnimation("cube_peek")
@@ -364,7 +398,6 @@ class PersonalityEngine(
                             RobotAction.PlayAnimation("small_bounce")
                         )
                     }
-                }
             }
 
             PersonalityEvent.PickedUp -> listOf(
@@ -464,6 +497,21 @@ class PersonalityEngine(
             PersonalityEvent.IdleTick -> idleDecision(state, now)
         }
     }
+
+    private fun originalReactionTrigger(event: PersonalityEvent): String? =
+        when (event) {
+            is PersonalityEvent.FaceDetected -> "FacePositionUpdated"
+            is PersonalityEvent.CubeDetected -> "ObjectPositionUpdated"
+            is PersonalityEvent.CubeMoved -> "CubeMoved"
+            PersonalityEvent.PickedUp -> "RobotPickedUp"
+            PersonalityEvent.PutDown -> "ReturnedToTreads"
+            PersonalityEvent.OnBack -> "RobotOnBack"
+            PersonalityEvent.OnFace -> "RobotOnFace"
+            PersonalityEvent.OnSide -> "RobotOnSide"
+            PersonalityEvent.Falling -> "RobotFalling"
+            PersonalityEvent.CliffDetected -> "CliffDetected"
+            else -> null
+        }
 
     private fun idleDecision(
         state: PersonalityState,
