@@ -48,7 +48,7 @@ internal object PersonalityAudioCatalog {
         val mechanical =
             decode(pool[random.nextInt(pool.size)])
         val vocal =
-            PersonalityToneSynth.synthesize(cue)
+            PersonalityToneSynth.synthesize(cue, random)
 
         return mix(
             vocal = vocal,
