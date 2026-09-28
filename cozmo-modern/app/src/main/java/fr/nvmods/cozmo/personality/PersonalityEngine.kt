@@ -727,6 +727,8 @@ class PersonalityEngine(
 
     companion object {
         private const val MAX_LOG_ENTRIES = 80
-        private const val ACTION_TIMEOUT_MS = 4_000L
+        // Un segment Hiking officiel/compatibilité dure ~3,7 s.
+        // On garde une marge sans masquer un vrai blocage (watchdog UI = 7,5 s).
+        private const val ACTION_TIMEOUT_MS = 5_500L
     }
 }
