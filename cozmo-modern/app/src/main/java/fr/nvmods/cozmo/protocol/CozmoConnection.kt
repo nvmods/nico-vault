@@ -32,7 +32,8 @@ enum class ChassisOrientation {
     ON_BACK,
     ON_FACE,
     ON_LEFT_SIDE,
-    ON_RIGHT_SIDE
+    ON_RIGHT_SIDE,
+    WHEELIE
 }
 
 data class CozmoState(
@@ -824,22 +825,31 @@ class CozmoConnection {
 
     companion object {
         private const val FACE_REFRESH_MS = 12_000L
-        private const val SIDE_GRAVITY_RATIO = 0.70f
+        private const val GRAVITY_AXIS_RATIO = 0.70f
 
+        /**
+         * Déduit la position physique de Cozmo avec le vecteur de gravité.
+         *
+         * Le pitch fourni par le firmware devient imprécis aux positions
+         * intermédiaires : un côté gauche pouvait être pris pour la face et
+         * un wheelie pour le dos. L'axe dominant de l'accéléromètre permet de
+         * distinguer directement les six appuis du châssis, quelle que soit
+         * l'unité utilisée par le firmware.
+         *
+         * Repère Cozmo observé :
+         * +Z = chenilles, -Z = dos
+         * -Y = côté gauche, +Y = côté droit
+         * -X = face, +X = arrière / wheelie
+         *
+         * Le pitch n'est conservé qu'en secours si la norme de l'accéléro est
+         * inexploitable.
+         */
         internal fun classifyChassisOrientation(
             posePitchRad: Float,
             accelX: Float,
             accelY: Float,
             accelZ: Float
         ): ChassisOrientation {
-            if (posePitchRad < -1.0f) {
-                return ChassisOrientation.ON_FACE
-            }
-
-            if (posePitchRad > 1.0f) {
-                return ChassisOrientation.ON_BACK
-            }
-
             val magnitude = sqrt(
                 (
                     accelX * accelX +
@@ -848,20 +858,33 @@ class CozmoConnection {
                     ).toDouble()
             ).toFloat()
 
-            if (magnitude < 0.001f) {
-                return ChassisOrientation.ON_THREADS
+            if (magnitude >= 0.001f) {
+                val xRatio = abs(accelX) / magnitude
+                val yRatio = abs(accelY) / magnitude
+                val zRatio = abs(accelZ) / magnitude
+                val dominant = maxOf(xRatio, yRatio, zRatio)
+
+                if (dominant >= GRAVITY_AXIS_RATIO) {
+                    return when (dominant) {
+                        xRatio ->
+                            if (accelX < 0f) ChassisOrientation.ON_FACE
+                            else ChassisOrientation.WHEELIE
+
+                        yRatio ->
+                            if (accelY < 0f) ChassisOrientation.ON_LEFT_SIDE
+                            else ChassisOrientation.ON_RIGHT_SIDE
+
+                        else ->
+                            if (accelZ < 0f) ChassisOrientation.ON_BACK
+                            else ChassisOrientation.ON_THREADS
+                    }
+                }
             }
 
-            val lateralRatio = abs(accelY) / magnitude
-
-            if (lateralRatio < SIDE_GRAVITY_RATIO) {
-                return ChassisOrientation.ON_THREADS
-            }
-
-            return if (accelY < 0f) {
-                ChassisOrientation.ON_LEFT_SIDE
-            } else {
-                ChassisOrientation.ON_RIGHT_SIDE
+            return when {
+                posePitchRad < -1.0f -> ChassisOrientation.ON_FACE
+                posePitchRad > 1.0f -> ChassisOrientation.ON_BACK
+                else -> ChassisOrientation.ON_THREADS
             }
         }
         private const val STATUS_IS_PICKED_UP = 0x0008L
