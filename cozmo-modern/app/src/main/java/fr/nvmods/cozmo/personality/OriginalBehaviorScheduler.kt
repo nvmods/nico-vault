@@ -73,8 +73,14 @@ class OriginalBehaviorScheduler(
 
             if (decision != null) {
                 lastIdleDecisionMs = now
-                if (enteringActivity) {
-                    lastActivityId = activityId
+
+                val selectedActivity = decision.activityId
+                val selectedEntering =
+                    lastActivityId != selectedActivity ||
+                        isActivityExpired(selectedActivity, now)
+
+                if (selectedEntering) {
+                    lastActivityId = selectedActivity
                     lastActivityChangeMs = now
                 }
                 return decision
