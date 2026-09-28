@@ -46,6 +46,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import fr.nvmods.cozmo.R
 import fr.nvmods.cozmo.personality.OriginalBehaviorLabels
 import fr.nvmods.cozmo.personality.PersonalityState
@@ -151,13 +152,13 @@ private fun HomeHeader(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            painter = painterResource(R.drawable.cozmo_logo),
-            contentDescription = "Cozmo",
-            modifier = Modifier
-                .weight(1f)
-                .height(42.dp),
-            alignment = Alignment.CenterStart
+        Text(
+            "COZMO",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            color = CozmoGraphite,
+            letterSpacing = 2.sp
         )
 
         ConnectionBadge(robotState)
