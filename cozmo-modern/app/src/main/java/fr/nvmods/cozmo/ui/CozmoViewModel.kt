@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import fr.nvmods.cozmo.audio.AndroidSpeechBridge
 import fr.nvmods.cozmo.protocol.BackpackColor
 import fr.nvmods.cozmo.protocol.CozmoConnection
+import fr.nvmods.cozmo.protocol.CozmoFaceExpression
 import fr.nvmods.cozmo.protocol.CozmoState
 import fr.nvmods.cozmo.protocol.CubeInfo
 import fr.nvmods.cozmo.protocol.ChassisOrientation
@@ -50,8 +51,10 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val faceDetector = CozmoFaceDetector()
     private var personalityTickerJob: Job? = null
+    private var personalityWatchdogJob: Job? = null
     private var faceDetectionJob: Job? = null
     private var personalityActionJob: Job? = null
+    private var personalityActionStartedMs = 0L
     private var manualPositionReleaseJob: Job? = null
     private var manualMotionActive = false
     private var previousCubes: Map<Long, CubeInfo> = emptyMap()
@@ -206,6 +209,8 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         if (!enabled) {
             personalityTickerJob?.cancel()
             personalityTickerJob = null
+            personalityWatchdogJob?.cancel()
+            personalityWatchdogJob = null
             faceDetectionJob?.cancel()
             faceDetectionJob = null
             previousFacePresent = false
@@ -249,6 +254,39 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
                     dispatchPersonality(
                         event = PersonalityEvent.IdleTick,
                         interruptCurrent = false
+                    )
+                }
+            }
+        }
+
+        personalityWatchdogJob?.cancel()
+        personalityWatchdogJob = viewModelScope.launch {
+            while (isActive && personality.state.value.enabled) {
+                delay(1_000L)
+
+                val actionJob = personalityActionJob
+                val runningFor =
+                    if (
+                        actionJob?.isActive == true &&
+                        personalityActionStartedMs > 0L
+                    ) {
+                        System.currentTimeMillis() - personalityActionStartedMs
+                    } else {
+                        0L
+                    }
+
+                if (runningFor >= PERSONALITY_ACTION_WATCHDOG_MS) {
+                    actionJob?.cancel()
+                    personalityActionJob = null
+                    personalityActionStartedMs = 0L
+
+                    connection.stopAllMotors()
+                    connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
+
+                    personality.reportRecoveredFault(
+                        "Watchdog : séquence personnalité bloquée " +
+                            runningFor +
+                            " ms, reprise automatique"
                     )
                 }
             }
@@ -345,6 +383,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        personalityActionStartedMs = System.currentTimeMillis()
         personalityActionJob = viewModelScope.launch {
             try {
                 personality.handle(event)
@@ -358,6 +397,8 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
                     "Dispatch ${event::class.simpleName}: " +
                         (t.message ?: t::class.java.simpleName)
                 )
+            } finally {
+                personalityActionStartedMs = 0L
             }
         }
     }
@@ -554,10 +595,12 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         private const val HEAD_STEP_RAD = 0.14f
         private const val LIFT_STEP_MM = 10f
         private const val MANUAL_POSITION_HOLD_MS = 700L
+        private const val PERSONALITY_ACTION_WATCHDOG_MS = 7_500L
     }
 
     override fun onCleared() {
         personalityTickerJob?.cancel()
+        personalityWatchdogJob?.cancel()
         faceDetectionJob?.cancel()
         personalityActionJob?.cancel()
         manualPositionReleaseJob?.cancel()
