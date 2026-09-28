@@ -32,14 +32,14 @@ class CozmoOrientationTest {
     }
 
     @Test
-    fun pitchDetectsBackAndFace() {
+    fun gravitySeparatesBackFaceAndWheelie() {
         assertEquals(
             ChassisOrientation.ON_BACK,
             CozmoConnection.classifyChassisOrientation(
                 posePitchRad = 1.25f,
-                accelX = 0f,
+                accelX = 0.1f,
                 accelY = 0f,
-                accelZ = 9.8f
+                accelZ = -9.8f
             )
         )
 
@@ -47,32 +47,65 @@ class CozmoOrientationTest {
             ChassisOrientation.ON_FACE,
             CozmoConnection.classifyChassisOrientation(
                 posePitchRad = -1.25f,
-                accelX = 0f,
-                accelY = 0f,
-                accelZ = 9.8f
+                accelX = -9.8f,
+                accelY = 0.1f,
+                accelZ = 0.2f
+            )
+        )
+
+        assertEquals(
+            ChassisOrientation.WHEELIE,
+            CozmoConnection.classifyChassisOrientation(
+                posePitchRad = 1.25f,
+                accelX = 9.8f,
+                accelY = 0.1f,
+                accelZ = 0.2f
             )
         )
     }
 
     @Test
-    fun lateralGravityDetectsSides() {
+    fun lateralGravityWinsOverMisleadingPitch() {
         assertEquals(
             ChassisOrientation.ON_LEFT_SIDE,
             CozmoConnection.classifyChassisOrientation(
-                posePitchRad = 0f,
-                accelX = 0f,
+                posePitchRad = -1.25f,
+                accelX = 0.2f,
                 accelY = -9.8f,
-                accelZ = 0.2f
+                accelZ = 0.1f
             )
         )
 
         assertEquals(
             ChassisOrientation.ON_RIGHT_SIDE,
             CozmoConnection.classifyChassisOrientation(
-                posePitchRad = 0f,
-                accelX = 0f,
+                posePitchRad = 1.25f,
+                accelX = 0.2f,
                 accelY = 9.8f,
-                accelZ = 0.2f
+                accelZ = 0.1f
+            )
+        )
+    }
+
+    @Test
+    fun pitchRemainsFallbackWhenAccelerometerIsUnavailable() {
+        assertEquals(
+            ChassisOrientation.ON_FACE,
+            CozmoConnection.classifyChassisOrientation(
+                posePitchRad = -1.25f,
+                accelX = 0f,
+                accelY = 0f,
+                accelZ = 0f
+            )
+        )
+
+        assertEquals(
+            ChassisOrientation.ON_BACK,
+            CozmoConnection.classifyChassisOrientation(
+                posePitchRad = 1.25f,
+                accelX = 0f,
+                accelY = 0f,
+                accelZ = 0f
             )
         )
     }
