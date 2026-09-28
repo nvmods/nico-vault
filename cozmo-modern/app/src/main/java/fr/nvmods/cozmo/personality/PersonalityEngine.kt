@@ -147,6 +147,12 @@ class PersonalityEngine(
                 lastStimulus = "Sur le côté"
             )
 
+            PersonalityEvent.Wheelie -> current.copy(
+                curiosity = (current.curiosity + 0.08f).unit(),
+                happiness = (current.happiness + 0.03f).unit(),
+                lastStimulus = "En wheelie"
+            )
+
             PersonalityEvent.Falling -> current.copy(
                 confidence = (current.confidence - 0.08f).unit(),
                 frustration = (current.frustration + 0.10f).unit(),
@@ -298,6 +304,12 @@ class PersonalityEngine(
                 RobotAction.PlayAnimation("on_side_notice")
             )
 
+            PersonalityEvent.Wheelie -> listOf(
+                RobotAction.Stop,
+                RobotAction.PlaySound(PersonalitySoundCue.EFFORT),
+                RobotAction.PlayAnimation("wheelie_notice")
+            )
+
             PersonalityEvent.Falling -> listOf(
                 RobotAction.Stop,
                 RobotAction.PlaySound(PersonalitySoundCue.SURPRISED),
@@ -349,21 +361,23 @@ class PersonalityEngine(
     ): List<RobotAction> {
         if (state.pickedUp || state.energy < 0.18f) return emptyList()
 
+        // Cozmo doit donner l'impression de "vivre" même sans stimulus.
+        // Les séquences restent courtes ; le mode calme conserve des pauses.
         val cooldownMs = when (state.mode) {
-            PersonalityMode.CALME -> 10_000L
-            PersonalityMode.NORMAL -> 5_500L
-            PersonalityMode.JOUEUR -> 3_500L
+            PersonalityMode.CALME -> 5_500L
+            PersonalityMode.NORMAL -> 2_600L
+            PersonalityMode.JOUEUR -> 1_700L
         }
 
         if (now - lastAutonomousDecisionMs < cooldownMs) return emptyList()
 
         val chance = when (state.mode) {
-            PersonalityMode.CALME -> 0.30f
-            PersonalityMode.NORMAL -> 0.62f
-            PersonalityMode.JOUEUR -> 0.82f
+            PersonalityMode.CALME -> 0.48f
+            PersonalityMode.NORMAL -> 0.82f
+            PersonalityMode.JOUEUR -> 0.95f
         }
 
-        if (state.curiosity < 0.50f || random.nextFloat() > chance) {
+        if (state.curiosity < 0.24f || random.nextFloat() > chance) {
             return emptyList()
         }
 
@@ -395,9 +409,9 @@ class PersonalityEngine(
 
         return when (random.nextInt(
             when (state.mode) {
-                PersonalityMode.CALME -> 4
-                PersonalityMode.NORMAL -> 6
-                PersonalityMode.JOUEUR -> 8
+                PersonalityMode.CALME -> 5
+                PersonalityMode.NORMAL -> 8
+                PersonalityMode.JOUEUR -> 10
             }
         )) {
             0 -> listOf(
@@ -432,6 +446,15 @@ class PersonalityEngine(
                 RobotAction.PlayAnimation("head_peek")
             )
 
+            7 -> listOf(
+                RobotAction.PlayAnimation("wander_short")
+            )
+
+            8 -> listOf(
+                RobotAction.PlaySound(PersonalitySoundCue.CURIOUS),
+                RobotAction.PlayAnimation("body_bob")
+            )
+
             else -> listOf(
                 RobotAction.PlaySound(PersonalitySoundCue.HAPPY_SHORT),
                 RobotAction.PlayAnimation("playful_invite")
@@ -456,6 +479,7 @@ class PersonalityEngine(
         PersonalityEvent.OnBack -> "Constater qu'il est sur le dos"
         PersonalityEvent.OnFace -> "Constater qu'il est sur la face"
         PersonalityEvent.OnSide -> "Constater qu'il est sur le côté"
+        PersonalityEvent.Wheelie -> "Réagir au wheelie"
         PersonalityEvent.Falling -> "Réagir à la chute"
         PersonalityEvent.CliffDetected -> "Sécuriser le bord"
         PersonalityEvent.Touched -> "Réagir au contact"
@@ -485,6 +509,7 @@ class PersonalityEngine(
         PersonalityEvent.OnBack -> "Sur le dos"
         PersonalityEvent.OnFace -> "Sur la face"
         PersonalityEvent.OnSide -> "Sur le côté"
+        PersonalityEvent.Wheelie -> "Wheelie"
         PersonalityEvent.Falling -> "Chute"
         PersonalityEvent.CliffDetected -> "Bord détecté"
         PersonalityEvent.Touched -> "Touché"
