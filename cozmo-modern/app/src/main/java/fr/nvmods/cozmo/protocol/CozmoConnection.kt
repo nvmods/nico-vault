@@ -25,11 +25,39 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 
+enum class ChassisOrientation {
+    ON_THREADS,
+    ON_BACK,
+    ON_FACE,
+    ON_LEFT_SIDE,
+    ON_RIGHT_SIDE
+}
+
 data class CozmoState(
     val connection: ConnectionState = ConnectionState.DISCONNECTED,
     val batteryVoltage: Float? = null,
     val headAngleRad: Float? = null,
     val liftHeightMm: Float? = null,
+    val poseAngleRad: Float? = null,
+    val posePitchRad: Float? = null,
+    val leftWheelSpeedMmps: Float? = null,
+    val rightWheelSpeedMmps: Float? = null,
+    val accelX: Float? = null,
+    val accelY: Float? = null,
+    val accelZ: Float? = null,
+    val gyroX: Float? = null,
+    val gyroY: Float? = null,
+    val gyroZ: Float? = null,
+    val robotStatus: Long = 0L,
+    val pickedUp: Boolean = false,
+    val falling: Boolean = false,
+    val onCharger: Boolean = false,
+    val charging: Boolean = false,
+    val cliffDetected: Boolean = false,
+    val wheelsMoving: Boolean = false,
+    val cliffRaw: List<Int> = List(4) { 0 },
+    val backpackTouchRaw: Int? = null,
+    val chassisOrientation: ChassisOrientation = ChassisOrientation.ON_THREADS,
     val firmwareSeen: Boolean = false,
     val bodySeen: Boolean = false,
     val lastError: String? = null,
@@ -474,7 +502,8 @@ class CozmoConnection {
         sendBatch(
             listOf(
                 OutboundCommand(0x45, CozmoProtocol.setOriginPayload()),
-                OutboundCommand(0x4b, CozmoProtocol.syncTimePayload())
+                OutboundCommand(0x4b, CozmoProtocol.syncTimePayload()),
+                OutboundCommand(0x60, byteArrayOf(1))
             )
         )
 
@@ -681,15 +710,71 @@ class CozmoConnection {
         val b = ByteBuffer.wrap(payload)
             .order(ByteOrder.LITTLE_ENDIAN)
 
+        val poseAngle = b.getFloat(24)
+        val posePitch = b.getFloat(28)
+        val leftWheel = b.getFloat(32)
+        val rightWheel = b.getFloat(36)
         val headAngle = b.getFloat(40)
         val liftHeight = b.getFloat(44)
+        val accelX = b.getFloat(48)
+        val accelY = b.getFloat(52)
+        val accelZ = b.getFloat(56)
+        val gyroX = b.getFloat(60)
+        val gyroY = b.getFloat(64)
+        val gyroZ = b.getFloat(68)
         val battery = b.getFloat(72)
+        val status = b.getInt(76).toLong() and 0xffffffffL
+
+        val cliffRaw =
+            if (payload.size >= 88) {
+                List(4) { index ->
+                    b.getShort(80 + index * 2).toInt() and 0xffff
+                }
+            } else {
+                _state.value.cliffRaw
+            }
+
+        val backpackTouch =
+            if (payload.size >= 90) {
+                b.getShort(88).toInt() and 0xffff
+            } else {
+                _state.value.backpackTouchRaw
+            }
+
+        // Même logique que PyCozmo pour classifier l'orientation du body.
+        val orientation = when {
+            poseAngle < -0.4f -> ChassisOrientation.ON_LEFT_SIDE
+            poseAngle > 0.4f -> ChassisOrientation.ON_RIGHT_SIDE
+            posePitch < -1.0f -> ChassisOrientation.ON_FACE
+            posePitch > 1.0f -> ChassisOrientation.ON_BACK
+            else -> ChassisOrientation.ON_THREADS
+        }
 
         _state.value = _state.value.copy(
             connection = ConnectionState.READY,
             headAngleRad = headAngle,
             liftHeightMm = liftHeight,
-            batteryVoltage = battery
+            batteryVoltage = battery,
+            poseAngleRad = poseAngle,
+            posePitchRad = posePitch,
+            leftWheelSpeedMmps = leftWheel,
+            rightWheelSpeedMmps = rightWheel,
+            accelX = accelX,
+            accelY = accelY,
+            accelZ = accelZ,
+            gyroX = gyroX,
+            gyroY = gyroY,
+            gyroZ = gyroZ,
+            robotStatus = status,
+            pickedUp = status and STATUS_IS_PICKED_UP != 0L,
+            falling = status and STATUS_IS_FALLING != 0L,
+            onCharger = status and STATUS_IS_ON_CHARGER != 0L,
+            charging = status and STATUS_IS_CHARGING != 0L,
+            cliffDetected = status and STATUS_CLIFF_DETECTED != 0L,
+            wheelsMoving = status and STATUS_WHEELS_MOVING != 0L,
+            cliffRaw = cliffRaw,
+            backpackTouchRaw = backpackTouch,
+            chassisOrientation = orientation
         )
     }
 
@@ -719,6 +804,12 @@ class CozmoConnection {
 
     companion object {
         private const val FACE_REFRESH_MS = 12_000L
+        private const val STATUS_IS_PICKED_UP = 0x0008L
+        private const val STATUS_IS_FALLING = 0x0020L
+        private const val STATUS_IS_ON_CHARGER = 0x1000L
+        private const val STATUS_IS_CHARGING = 0x2000L
+        private const val STATUS_CLIFF_DETECTED = 0x4000L
+        private const val STATUS_WHEELS_MOVING = 0x8000L
         const val HEAD_SPEED = 1.5f
         const val LIFT_SPEED = 1.5f
         const val DRIVE_SPEED = 70f
