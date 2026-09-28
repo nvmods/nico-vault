@@ -26,6 +26,7 @@ enum class CubeUpAxis(val raw: Int, val label: String) {
 data class CubeInfo(
     val factoryId: Long,
     val objectId: Long? = null,
+    val propSlot: Int? = null,
     val objectType: Int = -1,
     val rssi: Int? = null,
     val connected: Boolean = false,
@@ -95,9 +96,17 @@ internal class CubeManager(
     }
 
     fun setDiscovery(enabled: Boolean) {
+        val wasEnabled = discoveryEnabled
         discoveryEnabled = enabled
 
         if (enabled) {
+            if (!wasEnabled) {
+                // L'engine officiel maintient une table de 5 prop slots.
+                // Nettoyer les cinq entrées une seule fois au démarrage évite
+                // de conserver l'état invalide des anciennes versions où tous
+                // les cubes étaient écrits dans le slot 1.
+                clearAllPropSlots()
+            }
             ensureManager()
         } else {
             managerJob?.cancel()
@@ -128,6 +137,7 @@ internal class CubeManager(
             val previous = cubesByFactory[event.factoryId]
             val next =
                 (previous ?: CubeInfo(factoryId = event.factoryId)).copy(
+                    propSlot = slotForObjectType(event.objectType),
                     objectType = event.objectType,
                     rssi = event.rssi
                 )
@@ -195,11 +205,20 @@ internal class CubeManager(
                 lastSeenNanos[factoryId] = System.nanoTime()
                 nextConnectAllowedNanos.remove(factoryId)
 
+                val expectedSlot =
+                    previous.propSlot ?: slotForObjectType(objectType)
+
                 cubesByFactory[factoryId] = previous.copy(
                     objectId = objectId,
+                    propSlot = expectedSlot,
                     objectType = objectType,
                     connected = true,
-                    lastEvent = "Connecté"
+                    lastEvent =
+                        if (objectId.toInt() == expectedSlot) {
+                            "Connecté — slot $expectedSlot"
+                        } else {
+                            "Connecté — slot reçu $objectId / attendu $expectedSlot"
+                        }
                 )
             }
 
@@ -577,10 +596,24 @@ internal class CubeManager(
         }
         publish()
 
-        val payload =
-            CubeWireProtocol.objectConnect(candidate.factoryId, true)
+        val slot =
+            candidate.propSlot ?: slotForObjectType(candidate.objectType)
 
-        sendCommand(CubeWireProtocol.CMD_OBJECT_CONNECT, payload)
+        if (slot !in 0..4) {
+            synchronized(lock) {
+                connectingFactoryId = null
+            }
+            connectWaiter = null
+            return
+        }
+
+        val payload =
+            CubeWireProtocol.setPropSlot(
+                factoryId = candidate.factoryId,
+                slot = slot
+            )
+
+        sendCommand(CubeWireProtocol.CMD_SET_PROP_SLOT, payload)
 
         val result =
             withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
@@ -614,6 +647,23 @@ internal class CubeManager(
         publish()
     }
 
+    private fun clearAllPropSlots() {
+        for (slot in 0..4) {
+            sendCommand(
+                CubeWireProtocol.CMD_SET_PROP_SLOT,
+                CubeWireProtocol.clearPropSlot(slot)
+            )
+        }
+    }
+
+    private fun slotForObjectType(objectType: Int): Int =
+        when (objectType) {
+            1 -> 0
+            2 -> 1
+            3 -> 2
+            else -> -1
+        }
+
     private fun chooseConnectCandidate(): CubeInfo? {
         val now = System.nanoTime()
 
@@ -622,6 +672,7 @@ internal class CubeManager(
                 .filter {
                     !it.connected &&
                         it.objectType in 1..3 &&
+                        (it.propSlot ?: slotForObjectType(it.objectType)) in 0..4 &&
                         now >= (nextConnectAllowedNanos[it.factoryId] ?: 0L) &&
                         now - (lastSeenNanos[it.factoryId] ?: 0L) <
                             AVAILABLE_MAX_AGE_NS
@@ -708,7 +759,7 @@ internal class CubeManager(
                 cubesByFactory.values
                     .sortedWith(
                         compareBy<CubeInfo> {
-                            if (it.objectType in 1..3) it.objectType else 99
+                            it.propSlot ?: 99
                         }.thenBy { it.factoryId }
                     )
                     .toList()
