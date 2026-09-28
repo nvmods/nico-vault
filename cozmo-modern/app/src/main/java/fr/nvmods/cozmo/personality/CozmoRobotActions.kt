@@ -121,6 +121,7 @@ class CozmoRobotActions(
 
     private suspend fun playMotionMacro(name: String): ActionResult =
         coroutineScope {
+            var completedNormally = false
             val faceJob = launch {
                 when (name) {
                     "double_blink" -> {
@@ -398,12 +399,18 @@ class CozmoRobotActions(
                 }
 
                 faceJob.join()
+                completedNormally = true
                 ActionResult(ActionStatus.SUCCESS)
             } finally {
-                // Filet de sécurité essentiel lors d'un événement qui coupe une
-                // animation en cours : aucune commande moteur ne doit survivre.
                 faceJob.cancel()
-                connection.stopAllMotors()
+
+                // Sur une fin normale, chaque mouvement connaît désormais sa
+                // cible ou arrête lui-même les roues : ne pas envoyer un STOP
+                // global qui casserait les trajectoires tête/lift.
+                if (!completedNormally) {
+                    connection.stopAllMotors()
+                }
+
                 connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
             }
         }
