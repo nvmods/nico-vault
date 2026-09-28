@@ -58,12 +58,22 @@ class OriginalBehaviorScheduler(
         }
         if (now - lastIdleDecisionMs < minimumGapMs) return null
 
-        val preferred = preferredActivities(state)
+        val preferred = preferredActivities(state, now)
         for (activityId in preferred) {
-            val decision = chooseFromActivity(activityId, state, now)
+            val enteringActivity =
+                lastActivityId != activityId ||
+                    isActivityExpired(activityId, now)
+
+            val decision = chooseFromActivity(
+                activityId = activityId,
+                state = state,
+                now = now,
+                enteringActivity = enteringActivity
+            )
+
             if (decision != null) {
                 lastIdleDecisionMs = now
-                if (lastActivityId != activityId) {
+                if (enteringActivity) {
                     lastActivityId = activityId
                     lastActivityChangeMs = now
                 }
@@ -74,7 +84,25 @@ class OriginalBehaviorScheduler(
         return null
     }
 
-    private fun preferredActivities(state: PersonalityState): List<String> {
+    private fun preferredActivities(
+        state: PersonalityState,
+        now: Long
+    ): List<String> {
+        val active = lastActivityId
+        if (
+            active != null &&
+            !isActivityExpired(active, now)
+        ) {
+            val fallback = preferredActivitiesWithoutCurrent(state)
+            return listOf(active) + fallback.filterNot { it == active }
+        }
+
+        return preferredActivitiesWithoutCurrent(state)
+    }
+
+    private fun preferredActivitiesWithoutCurrent(
+        state: PersonalityState
+    ): List<String> {
         if (state.knownFaceVisible) {
             return if (state.mode == PersonalityMode.JOUEUR) {
                 listOf("Socialize", "PlayWithHumans", "Hiking", "NothingToDo")
@@ -119,11 +147,22 @@ class OriginalBehaviorScheduler(
     private fun chooseFromActivity(
         activityId: String,
         state: PersonalityState,
-        now: Long
+        now: Long,
+        enteringActivity: Boolean
     ): OriginalBehaviorDecision? {
         val activity = profile.activities[activityId] ?: return null
 
         val candidates = activity.behaviors.mapNotNull { rule ->
+            if (
+                !isBehaviorRunnable(
+                    activityId = activityId,
+                    behaviorId = rule.id,
+                    enteringActivity = enteringActivity
+                )
+            ) {
+                return@mapNotNull null
+            }
+
             val actions = actionsFor(rule.id, state) ?: return@mapNotNull null
             val multiplier = repetitionMultiplier(rule, now)
             val base = if (rule.score > 0.0) rule.score else directObjectiveWeight(rule.id)
@@ -134,7 +173,12 @@ class OriginalBehaviorScheduler(
 
         if (candidates.isEmpty()) {
             return if (activityId != "NothingToDo") {
-                chooseFromActivity("NothingToDo", state, now)
+                chooseFromActivity(
+                    "NothingToDo",
+                    state,
+                    now,
+                    enteringActivity = lastActivityId != "NothingToDo"
+                )
             } else {
                 null
             }
@@ -148,6 +192,50 @@ class OriginalBehaviorScheduler(
             behaviorId = chosen.behaviorId,
             actions = chosen.actions
         )
+    }
+
+    private fun isActivityExpired(
+        activityId: String,
+        now: Long
+    ): Boolean {
+        if (lastActivityId != activityId) return true
+
+        val duration = profile.activities[activityId]?.shouldEndSeconds
+            ?: return false
+        if (duration <= 0.0) return false
+
+        return now - lastActivityChangeMs >= (duration * 1000.0).toLong()
+    }
+
+    /**
+     * Conditions de runnability présentes dans les comportements Anki mais
+     * absentes du simple tableau de scores normalisé.
+     *
+     * Sans ces gardes, FirstLookIntro (score 9) restait sélectionnable pour
+     * toujours et empêchait pratiquement Hiking d'entrer dans sa navigation.
+     */
+    private fun isBehaviorRunnable(
+        activityId: String,
+        behaviorId: String,
+        enteringActivity: Boolean
+    ): Boolean {
+        if (activityId != "Hiking") return true
+
+        return when (behaviorId) {
+            "Hiking_FirstLookIntro" -> enteringActivity
+
+            // L'original exige requiredRecentDriveOffCharger_sec = 1.0.
+            // On ne prétend pas l'avoir tant qu'on ne suit pas cet événement.
+            "Hiking_FirstLookWakeUp" -> false
+
+            // Ces comportements dépendent du memory map / ground motion
+            // analyzer propriétaire. Ils ne doivent pas dominer les scores
+            // tant que leur perception n'est pas réellement implémentée.
+            "Hiking_ThinkAboutBeacons",
+            "Hiking_PounceOnMotion" -> false
+
+            else -> true
+        }
     }
 
     private fun repetitionMultiplier(
@@ -249,7 +337,8 @@ class OriginalBehaviorScheduler(
                 RobotAction.Stop,
                 RobotAction.PlaySound(PersonalitySoundCue.CLIFF),
                 RobotAction.Backpack(PersonalityLight.RED),
-                RobotAction.PlayAnimation("cliff_notice")
+                RobotAction.PlayAnimation("cliff_react_original"),
+                RobotAction.Backpack(PersonalityLight.OFF)
             )
 
             behaviorId == "ReactToRobotShaken" -> listOf(
@@ -287,11 +376,16 @@ class OriginalBehaviorScheduler(
                     )
                 }
 
-            behaviorId == "Hiking_FirstLookIntro" ||
-                behaviorId == "Hiking_FirstLookWakeUp" ->
+            behaviorId == "Hiking_FirstLookIntro" ->
                 listOf(
-                    RobotAction.Express("look_around", PersonalitySoundCue.CURIOUS)
+                    RobotAction.Express(
+                        "hiking_intro_original",
+                        PersonalitySoundCue.CURIOUS
+                    )
                 )
+
+            behaviorId == "Hiking_FirstLookWakeUp" ->
+                listOf(RobotAction.PlayAnimation("hiking_intro_original"))
 
             behaviorId == "Hiking_ThinkAboutBeacons" ->
                 listOf(RobotAction.Express("micro_scan"))
@@ -302,12 +396,10 @@ class OriginalBehaviorScheduler(
                 )
 
             behaviorId == "Hiking_VisitInterestingEdge" ->
-                listOf(RobotAction.Express("wander_short"))
+                listOf(RobotAction.PlayAnimation("hiking_visit_edge_original"))
 
             behaviorId == "Hiking_LookInPlaceForUnknown" ->
-                listOf(
-                    RobotAction.Express("head_peek", PersonalitySoundCue.CURIOUS)
-                )
+                listOf(RobotAction.PlayAnimation("hiking_scan_original"))
 
             behaviorId == "GuardDog" ->
                 listOf(
