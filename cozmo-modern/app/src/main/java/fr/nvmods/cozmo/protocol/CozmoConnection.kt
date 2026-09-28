@@ -212,7 +212,7 @@ class CozmoConnection {
             ),
             OutboundCommand(
                 0x66,
-                byteArrayOf(0.toByte())
+                byteArrayOf((if (enabled) 1 else 0).toByte())
             )
         )
 
