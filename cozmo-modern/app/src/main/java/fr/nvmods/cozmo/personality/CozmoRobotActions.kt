@@ -103,6 +103,18 @@ class CozmoRobotActions(
             "acknowledge" -> CozmoFaceExpression.CURIOUS
             "low_energy" -> CozmoFaceExpression.SLEEPY
             "look_around" -> CozmoFaceExpression.CURIOUS
+            "idle_blink" -> CozmoFaceExpression.BLINK
+            "double_blink" -> CozmoFaceExpression.BLINK
+            "curious_nod" -> CozmoFaceExpression.CURIOUS
+            "head_peek" -> CozmoFaceExpression.CURIOUS
+            "small_bounce" -> CozmoFaceExpression.HAPPY
+            "tiny_wiggle" -> CozmoFaceExpression.HAPPY
+            "cube_peek" -> CozmoFaceExpression.CURIOUS
+            "on_back_notice" -> CozmoFaceExpression.SURPRISED
+            "on_face_notice" -> CozmoFaceExpression.SAD
+            "on_side_notice" -> CozmoFaceExpression.CURIOUS
+            "fall_notice" -> CozmoFaceExpression.SURPRISED
+            "cliff_notice" -> CozmoFaceExpression.SURPRISED
             else -> null
         }
 
@@ -158,6 +170,70 @@ class CozmoRobotActions(
                 drivePulse(-32f, 32f, 150)
                 drivePulse(32f, -32f, 300)
                 drivePulse(-32f, 32f, 150)
+            }
+
+            "idle_blink" -> {
+                delay(130)
+            }
+
+            "double_blink" -> {
+                delay(90)
+                connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
+                delay(90)
+                connection.setFaceExpression(CozmoFaceExpression.BLINK)
+                delay(90)
+            }
+
+            "curious_nod" -> {
+                headPulse(-0.38f, 95)
+                headPulse(0.42f, 110)
+            }
+
+            "head_peek" -> {
+                headPulse(0.45f, 120)
+                delay(90)
+                headPulse(-0.28f, 85)
+            }
+
+            "small_bounce" -> {
+                liftPulse(0.45f, 75)
+                headPulse(0.38f, 75)
+                liftPulse(-0.35f, 65)
+            }
+
+            "tiny_wiggle" -> {
+                drivePulse(-24f, 24f, 105)
+                drivePulse(24f, -24f, 210)
+                drivePulse(-24f, 24f, 105)
+            }
+
+            "cube_peek" -> {
+                headPulse(-0.48f, 115)
+                liftPulse(0.38f, 80)
+                delay(100)
+                liftPulse(-0.30f, 70)
+            }
+
+            "on_back_notice" -> {
+                headPulse(0.32f, 90)
+            }
+
+            "on_face_notice" -> {
+                liftPulse(-0.28f, 85)
+            }
+
+            "on_side_notice" -> {
+                headPulse(0.30f, 75)
+            }
+
+            "fall_notice" -> {
+                connection.stopAllMotors()
+                delay(120)
+            }
+
+            "cliff_notice" -> {
+                connection.stopAllMotors()
+                headPulse(-0.42f, 95)
             }
 
             else -> {
