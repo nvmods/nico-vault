@@ -97,17 +97,12 @@ internal class CubeManager(
     }
 
     fun setDiscovery(enabled: Boolean) {
-        val wasEnabled = discoveryEnabled
         discoveryEnabled = enabled
 
         if (enabled) {
-            if (!wasEnabled) {
-                // L'engine officiel maintient une table de 5 prop slots.
-                // Nettoyer les cinq entrées une seule fois au démarrage évite
-                // de conserver l'état invalide des anciennes versions où tous
-                // les cubes étaient écrits dans le slot 1.
-                clearAllPropSlots()
-            }
+            // Ne pas vider automatiquement les prop slots : une commande de
+            // maintenance ne doit jamais être envoyée au moment où l'on vient
+            // juste d'établir la liaison avec Cozmo.
             ensureManager()
         } else {
             managerJob?.cancel()
@@ -650,15 +645,6 @@ internal class CubeManager(
 
         connectWaiter = null
         publish()
-    }
-
-    private fun clearAllPropSlots() {
-        for (slot in 0..4) {
-            sendCommand(
-                CubeWireProtocol.CMD_SET_PROP_SLOT,
-                CubeWireProtocol.clearPropSlot(slot)
-            )
-        }
     }
 
     private fun slotForObjectType(objectType: Int): Int =
