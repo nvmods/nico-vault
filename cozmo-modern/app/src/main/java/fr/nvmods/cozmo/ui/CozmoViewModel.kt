@@ -113,7 +113,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         manualMotionActive = false
     }
 
-    fun headUp() = manualPosition {
+    fun headUp() = manualHeadPosition {
         val currentDeg = CozmoConnection.radToDeg(
             state.value.headAngleRad ?: 0f
         )
@@ -125,7 +125,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun headDown() = manualPosition {
+    fun headDown() = manualHeadPosition {
         val currentDeg = CozmoConnection.radToDeg(
             state.value.headAngleRad ?: 0f
         )
@@ -369,6 +369,22 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         action()
     }
 
+    private fun manualHeadPosition(action: () -> Unit) {
+        personalityActionJob?.cancel()
+        personalityActionJob = null
+        manualPositionReleaseJob?.cancel()
+        manualMotionActive = true
+
+        connection.beginAnimation()
+        action()
+
+        manualPositionReleaseJob = viewModelScope.launch {
+            delay(MANUAL_HEAD_ANIMATION_MS)
+            connection.endAnimation()
+            manualMotionActive = false
+        }
+    }
+
     private fun manualPosition(action: () -> Unit) {
         personalityActionJob?.cancel()
         personalityActionJob = null
@@ -607,6 +623,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         private const val HEAD_STEP_DEG = 8f
         private const val LIFT_STEP_MM = 10f
         private const val MANUAL_POSITION_HOLD_MS = 700L
+        private const val MANUAL_HEAD_ANIMATION_MS = 220L
         private const val PERSONALITY_ACTION_WATCHDOG_MS = 7_500L
     }
 
