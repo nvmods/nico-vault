@@ -1,0 +1,39 @@
+package fr.nvmods.cozmo.protocol
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+class CozmoFaceDisplayTest {
+
+    @Test
+    fun everyExpressionProducesLengthPrefixedImage() {
+        CozmoFaceExpression.entries.forEach { expression ->
+            val payload = CozmoFaceDisplay.payload(expression)
+
+            assertTrue(
+                "Payload trop court pour $expression",
+                payload.size > 2
+            )
+
+            val declaredLength =
+                ByteBuffer.wrap(payload, 0, 2)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                    .short
+                    .toInt() and 0xffff
+
+            assertEquals(
+                "Longueur incohérente pour $expression",
+                payload.size - 2,
+                declaredLength
+            )
+
+            assertTrue(
+                "Image RLE vide pour $expression",
+                declaredLength > 0
+            )
+        }
+    }
+}
