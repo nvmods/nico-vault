@@ -76,6 +76,7 @@ internal class CubeManager(
     private var connectWaiter: CompletableDeferred<Boolean>? = null
 
     fun reset() {
+        discoveryEnabled = false
         managerJob?.cancel()
         managerJob = null
         connectWaiter?.cancel()
