@@ -45,8 +45,8 @@ internal object CozmoFaceDisplay {
 
         when (expression) {
             CozmoFaceExpression.NEUTRAL -> {
-                eye(p, 41, 16, 17, 22)
-                eye(p, 87, 16, 17, 22)
+                squareEye(p, 41, 16, 20, 22)
+                squareEye(p, 87, 16, 20, 22)
             }
 
             CozmoFaceExpression.HAPPY -> {
@@ -55,13 +55,13 @@ internal object CozmoFaceDisplay {
             }
 
             CozmoFaceExpression.CURIOUS -> {
-                eye(p, 41, 16, 19, 24)
-                eye(p, 87, 17, 14, 18)
+                squareEye(p, 41, 16, 22, 24)
+                squareEye(p, 87, 17, 16, 17)
             }
 
             CozmoFaceExpression.SURPRISED -> {
-                eye(p, 41, 16, 20, 25)
-                eye(p, 87, 16, 20, 25)
+                squareEye(p, 41, 16, 23, 26)
+                squareEye(p, 87, 16, 23, 26)
             }
 
             CozmoFaceExpression.SLEEPY -> {
@@ -70,15 +70,15 @@ internal object CozmoFaceDisplay {
             }
 
             CozmoFaceExpression.SAD -> {
-                eye(p, 41, 18, 17, 18)
-                eye(p, 87, 18, 17, 18)
+                squareEye(p, 41, 18, 20, 18)
+                squareEye(p, 87, 18, 20, 18)
                 cutDiagonalTop(p, 30, 52, rising = false)
                 cutDiagonalTop(p, 76, 98, rising = true)
             }
 
             CozmoFaceExpression.ANGRY -> {
-                eye(p, 41, 17, 18, 20)
-                eye(p, 87, 17, 18, 20)
+                squareEye(p, 41, 17, 21, 20)
+                squareEye(p, 87, 17, 21, 20)
                 cutDiagonalTop(p, 30, 52, rising = true)
                 cutDiagonalTop(p, 76, 98, rising = false)
             }
@@ -90,6 +90,28 @@ internal object CozmoFaceDisplay {
         }
 
         return p
+    }
+
+    private fun squareEye(
+        p: BooleanArray,
+        cx: Int,
+        cy: Int,
+        width: Int,
+        height: Int
+    ) {
+        val left = cx - width / 2
+        val right = left + width
+        val top = cy - height / 2
+        val bottom = top + height
+
+        roundedRect(
+            p = p,
+            left = left,
+            top = top,
+            right = right,
+            bottom = bottom,
+            radius = 4
+        )
     }
 
     private fun eye(
