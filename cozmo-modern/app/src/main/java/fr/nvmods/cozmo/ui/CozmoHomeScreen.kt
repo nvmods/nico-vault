@@ -272,63 +272,114 @@ private fun PersonalityHero(
 
             Spacer(Modifier.height(14.dp))
 
-            if (robotState.connection == ConnectionState.DISCONNECTED) {
-                Button(
-                    onClick = vm::connect,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null)
-                    Text("  Connecter Cozmo")
-                }
-                Text(
-                    "Connecte d'abord le téléphone au Wi-Fi de Cozmo.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = CozmoGraphite.copy(alpha = 0.58f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            } else {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(
-                            CozmoYellow.copy(alpha = 0.18f),
-                            RoundedCornerShape(18.dp)
-                        )
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Mode autonome",
-                            fontWeight = FontWeight.Bold,
-                            color = CozmoGraphite
-                        )
-                        Text(
-                            if (personalityState.enabled) {
-                                "Cozmo fait sa vie"
-                            } else {
-                                "Autonomie en pause"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = CozmoGraphite.copy(alpha = 0.62f)
-                        )
+            when (robotState.connection) {
+                ConnectionState.DISCONNECTED -> {
+                    Button(
+                        onClick = vm::connect,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PowerSettingsNew, contentDescription = null)
+                        Text("  Connecter Cozmo")
                     }
-                    Switch(
-                        checked = personalityState.enabled,
-                        onCheckedChange = vm::personalityEnabled
+                    Text(
+                        robotState.lastError
+                            ?: "Connecte d'abord le téléphone au Wi-Fi de Cozmo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (robotState.lastError != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            CozmoGraphite.copy(alpha = 0.58f)
+                        },
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
                 }
 
-                FilledTonalButton(
-                    onClick = vm::personalityInteract,
-                    enabled = personalityState.enabled &&
-                        robotState.connection == ConnectionState.READY,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp)
-                ) {
-                    Text("Hé Cozmo !")
+                ConnectionState.CONNECTING -> {
+                    Text(
+                        "Connexion à Cozmo…",
+                        fontWeight = FontWeight.Bold,
+                        color = CozmoGraphite
+                    )
+                    Text(
+                        robotState.lastError
+                            ?: "Recherche de la première réponse UDP du robot.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (robotState.lastError != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            CozmoGraphite.copy(alpha = 0.58f)
+                        },
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                    FilledTonalButton(
+                        onClick = vm::connect,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                    ) {
+                        Text("Relancer la connexion")
+                    }
+                }
+
+                ConnectionState.CONNECTED -> {
+                    Text(
+                        "Cozmo répond — initialisation…",
+                        fontWeight = FontWeight.Bold,
+                        color = CozmoCyan
+                    )
+                    Text(
+                        "Firmware=" + if (robotState.firmwareSeen) "OK" else "…" +
+                            "  •  Body=" + if (robotState.bodySeen) "OK" else "…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CozmoGraphite.copy(alpha = 0.62f),
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+
+                ConnectionState.READY -> {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                CozmoYellow.copy(alpha = 0.18f),
+                                RoundedCornerShape(18.dp)
+                            )
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Mode autonome",
+                                fontWeight = FontWeight.Bold,
+                                color = CozmoGraphite
+                            )
+                            Text(
+                                if (personalityState.enabled) {
+                                    "Cozmo fait sa vie"
+                                } else {
+                                    "Autonomie en pause"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CozmoGraphite.copy(alpha = 0.62f)
+                            )
+                        }
+                        Switch(
+                            checked = personalityState.enabled,
+                            onCheckedChange = vm::personalityEnabled
+                        )
+                    }
+
+                    FilledTonalButton(
+                        onClick = vm::personalityInteract,
+                        enabled = personalityState.enabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                    ) {
+                        Text("Hé Cozmo !")
+                    }
                 }
             }
         }
