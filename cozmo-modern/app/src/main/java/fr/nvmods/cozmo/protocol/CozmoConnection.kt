@@ -132,6 +132,7 @@ class CozmoConnection {
 
     private var lastRobotSeq = CozmoProtocol.OOB_SEQ
     private var pingCounter = 0
+    private var nextAnimationId = 1
 
     suspend fun connect() {
         disconnect()
@@ -231,6 +232,7 @@ class CozmoConnection {
 
         lastRobotSeq = CozmoProtocol.OOB_SEQ
         pingCounter = 0
+        nextAnimationId = 1
         receiveWindow.reset()
 
         _state.value = CozmoState(connection = ConnectionState.DISCONNECTED)
@@ -343,6 +345,41 @@ class CozmoConnection {
             heightMm.coerceIn(0, 255).toByte()
         )
         sendCommand(0x94, payload)
+    }
+
+    /**
+     * Mouvement corps natif d'une animation Anki (AnimBody 0x99).
+     * Pour un rayon STRAIGHT, PyCozmo envoie unknown=32767.
+     */
+    fun animBody(speedMmps: Int) {
+        val payload = ByteBuffer.allocate(4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putShort(speedMmps.coerceIn(-32768, 32767).toShort())
+            .putShort(32767.toShort())
+            .array()
+        sendCommand(0x99, payload)
+    }
+
+    /**
+     * Encadrement officiel d'un clip d'animation :
+     * EndAnimation (annule l'ancien), puis StartAnimation avec identifiant.
+     * PyCozmo fait exactement cette séquence avant d'envoyer AnimHead/Lift/Body.
+     */
+    fun beginAnimation() {
+        val id = nextAnimationId
+        nextAnimationId =
+            if (nextAnimationId >= 255) 1 else nextAnimationId + 1
+
+        sendBatch(
+            listOf(
+                OutboundCommand(0x9a),
+                OutboundCommand(0x9b, byteArrayOf(id.toByte()))
+            )
+        )
+    }
+
+    fun endAnimation() {
+        sendCommand(0x9a)
     }
 
     fun setHeadLight(enabled: Boolean) {
