@@ -12,8 +12,8 @@ android {
         applicationId = "fr.nvmods.cozmo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.9.0"
+        versionCode = 19
+        versionName = "0.9.1-baseline"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
