@@ -167,6 +167,10 @@ internal class CubeManager(
         val objectType = event.objectType
         val connected = event.connected
 
+        // SetPropSlot(0, slot) vide explicitement un slot. Certains firmwares
+        // peuvent notifier cet état avec factory_id=0 : ce n'est pas un cube.
+        if (factoryId == 0L) return
+
         if (connected) {
             if (connectingFactoryId == factoryId) {
                 connectWaiter?.complete(true)
