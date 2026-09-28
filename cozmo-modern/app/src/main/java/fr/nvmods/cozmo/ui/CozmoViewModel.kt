@@ -52,6 +52,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     private var personalityTickerJob: Job? = null
     private var faceDetectionJob: Job? = null
     private var personalityActionJob: Job? = null
+    private var manualPositionReleaseJob: Job? = null
     private var manualMotionActive = false
     private var previousCubes: Map<Long, CubeInfo> = emptyMap()
     private var previousPickedUp: Boolean? = null
@@ -108,20 +109,28 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         manualMotionActive = false
     }
 
-    fun headUp() = manualMotion {
-        connection.moveHead(CozmoConnection.HEAD_SPEED)
+    fun headUp() = manualPosition {
+        val current =
+            state.value.headAngleRad ?: CozmoConnection.HEAD_NEUTRAL_RAD
+        connection.setHeadAngle(current + HEAD_STEP_RAD)
     }
 
-    fun headDown() = manualMotion {
-        connection.moveHead(-CozmoConnection.HEAD_SPEED)
+    fun headDown() = manualPosition {
+        val current =
+            state.value.headAngleRad ?: CozmoConnection.HEAD_NEUTRAL_RAD
+        connection.setHeadAngle(current - HEAD_STEP_RAD)
     }
 
-    fun liftUp() = manualMotion {
-        connection.moveLift(CozmoConnection.LIFT_SPEED)
+    fun liftUp() = manualPosition {
+        val current =
+            state.value.liftHeightMm ?: CozmoConnection.MIN_LIFT_HEIGHT_MM
+        connection.setLiftHeight(current + LIFT_STEP_MM)
     }
 
-    fun liftDown() = manualMotion {
-        connection.moveLift(-CozmoConnection.LIFT_SPEED)
+    fun liftDown() = manualPosition {
+        val current =
+            state.value.liftHeightMm ?: CozmoConnection.MIN_LIFT_HEIGHT_MM
+        connection.setLiftHeight(current - LIFT_STEP_MM)
     }
 
     fun headLight(enabled: Boolean) = connection.setHeadLight(enabled)
@@ -301,10 +310,27 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun manualMotion(action: () -> Unit) {
+        manualPositionReleaseJob?.cancel()
+        manualPositionReleaseJob = null
         personalityActionJob?.cancel()
         personalityActionJob = null
         manualMotionActive = true
         action()
+    }
+
+    private fun manualPosition(action: () -> Unit) {
+        personalityActionJob?.cancel()
+        personalityActionJob = null
+        manualPositionReleaseJob?.cancel()
+        manualMotionActive = true
+        action()
+
+        // Une consigne absolue s'arrête à sa cible. On rend donc rapidement
+        // la main à la personnalité sans obliger l'utilisateur à appuyer STOP.
+        manualPositionReleaseJob = viewModelScope.launch {
+            delay(MANUAL_POSITION_HOLD_MS)
+            manualMotionActive = false
+        }
     }
 
     private fun dispatchPersonality(
@@ -525,12 +551,16 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val FACE_REACTION_COOLDOWN_MS = 12_000L
+        private const val HEAD_STEP_RAD = 0.14f
+        private const val LIFT_STEP_MM = 10f
+        private const val MANUAL_POSITION_HOLD_MS = 700L
     }
 
     override fun onCleared() {
         personalityTickerJob?.cancel()
         faceDetectionJob?.cancel()
         personalityActionJob?.cancel()
+        manualPositionReleaseJob?.cancel()
         personality.stop()
         speech.shutdown()
         connection.close()
