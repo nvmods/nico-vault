@@ -66,10 +66,17 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
     val speechStatus by vm.speechStatus.collectAsState()
     val personalityState by vm.personalityState.collectAsState()
     val personalityLog by vm.personalityLog.collectAsState()
-    var tab by remember { mutableIntStateOf(0) }
+    var section by remember { mutableStateOf(CozmoSection.HOME) }
 
-    MaterialTheme(colorScheme = lightColorScheme()) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            primary = CozmoCyan,
+            secondary = CozmoYellow,
+            background = CozmoCream
+        )
+    ) {
         Scaffold(
+            containerColor = CozmoCream,
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
@@ -80,38 +87,53 @@ fun CozmoApp(vm: CozmoViewModel = viewModel()) {
                     .padding(padding)
                     .fillMaxSize()
             ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Text(
-                        "Cozmo Modern 0.15.0",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                if (section == CozmoSection.HOME) {
+                    CozmoHomeScreen(
+                        robotState = state,
+                        personalityState = personalityState,
+                        vm = vm,
+                        onOpen = { section = it }
                     )
-                    Text(
-                        "Liaison stable + caméra + cubes + personnalité autonome",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                TabRow(selectedTabIndex = tab) {
-                    listOf("Pilotage", "Caméra", "Voix & cubes", "Personnalité").forEachIndexed { index, label ->
-                        Tab(
-                            selected = tab == index,
-                            onClick = { tab = index },
-                            text = { Text(label) }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalButton(
+                            onClick = { section = CozmoSection.HOME }
+                        ) {
+                            Text("← Accueil")
+                        }
+                        Text(
+                            text = when (section) {
+                                CozmoSection.CONTROL -> "Pilotage"
+                                CozmoSection.CAMERA -> "Caméra"
+                                CozmoSection.VOICE_CUBES -> "Voix & cubes"
+                                CozmoSection.DIAGNOSTICS -> "Diagnostic"
+                                CozmoSection.HOME -> ""
+                            },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 12.dp)
                         )
                     }
-                }
 
-                when (tab) {
-                    0 -> PilotageTab(state, vm)
-                    1 -> CameraTab(state, vm)
-                    2 -> VoiceCubeTab(state, speechStatus, vm)
-                    else -> PersonalityTab(
-                        robotState = state,
-                        state = personalityState,
-                        log = personalityLog,
-                        vm = vm
-                    )
+                    when (section) {
+                        CozmoSection.CONTROL -> PilotageTab(state, vm)
+                        CozmoSection.CAMERA -> CameraTab(state, vm)
+                        CozmoSection.VOICE_CUBES ->
+                            VoiceCubeTab(state, speechStatus, vm)
+                        CozmoSection.DIAGNOSTICS ->
+                            PersonalityTab(
+                                robotState = state,
+                                state = personalityState,
+                                log = personalityLog,
+                                vm = vm
+                            )
+                        CozmoSection.HOME -> Unit
+                    }
                 }
             }
         }
