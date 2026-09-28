@@ -14,6 +14,7 @@ import fr.nvmods.cozmo.personality.PersonalityEngine
 import fr.nvmods.cozmo.personality.PersonalityEvent
 import fr.nvmods.cozmo.personality.PersonalityMode
 import fr.nvmods.cozmo.vision.CozmoFaceDetector
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -214,7 +215,7 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         personalityTickerJob?.cancel()
         personalityTickerJob = viewModelScope.launch {
             while (isActive) {
-                delay(1_000)
+                delay(450)
 
                 if (
                     personality.state.value.enabled &&
@@ -304,7 +305,19 @@ class CozmoViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         personalityActionJob = viewModelScope.launch {
-            personality.handle(event)
+            try {
+                personality.handle(event)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Exception) {
+                // Dernier filet : une erreur du moteur de personnalité ne doit
+                // jamais faire tomber l'UI ou laisser les moteurs actifs.
+                connection.stopAllMotors()
+                personality.reportRecoveredFault(
+                    "Dispatch ${event::class.simpleName}: " +
+                        (t.message ?: t::class.java.simpleName)
+                )
+            }
         }
     }
 
