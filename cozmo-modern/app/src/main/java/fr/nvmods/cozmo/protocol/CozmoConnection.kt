@@ -162,15 +162,44 @@ class CozmoConnection {
             sendFrameNow(CozmoProtocol.resetFrame())
 
             pingJob = scope.launch {
+                val handshakeStartedMs = System.currentTimeMillis()
+                var handshakeWarningSent = false
+
                 while (isActive) {
                     delay(500)
-                    if (_state.value.connection >= ConnectionState.CONNECTED) {
-                        sendFrameNow(
-                            CozmoProtocol.pingFrame(
-                                ack = lastRobotSeq,
-                                counter = pingCounter++
+
+                    when (_state.value.connection) {
+                        ConnectionState.CONNECTING -> {
+                            // Le RESET initial peut être perdu ou arriver alors
+                            // que le robot n'est pas encore prêt. On le renvoie
+                            // tant que Cozmo n'a pas répondu au handshake.
+                            sendFrameNow(CozmoProtocol.resetFrame())
+
+                            if (
+                                !handshakeWarningSent &&
+                                System.currentTimeMillis() - handshakeStartedMs >=
+                                    HANDSHAKE_WARNING_MS
+                            ) {
+                                handshakeWarningSent = true
+                                fail(
+                                    "Toujours aucune réponse de Cozmo après " +
+                                        (HANDSHAKE_WARNING_MS / 1000L) +
+                                        " s — RESET UDP retransmis automatiquement"
+                                )
+                            }
+                        }
+
+                        ConnectionState.CONNECTED,
+                        ConnectionState.READY -> {
+                            sendFrameNow(
+                                CozmoProtocol.pingFrame(
+                                    ack = lastRobotSeq,
+                                    counter = pingCounter++
+                                )
                             )
-                        )
+                        }
+
+                        ConnectionState.DISCONNECTED -> Unit
                     }
                 }
             }
@@ -645,7 +674,8 @@ class CozmoConnection {
 
             _state.value = _state.value.copy(
                 packetsReceived =
-                    _state.value.packetsReceived + frame.packets.size
+                    _state.value.packetsReceived + frame.packets.size,
+                lastError = null
             )
 
             if (
@@ -838,6 +868,7 @@ class CozmoConnection {
 
     companion object {
         private const val FACE_REFRESH_MS = 4_000L
+        private const val HANDSHAKE_WARNING_MS = 6_000L
         private const val AUDIO_FRAME_RATE = 30L
         private const val GRAVITY_AXIS_RATIO = 0.70f
 
