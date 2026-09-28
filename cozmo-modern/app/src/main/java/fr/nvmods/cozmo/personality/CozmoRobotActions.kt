@@ -10,11 +10,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Adaptateur entre les intentions de personnalité et le vrai robot.
+ * Adaptateur entre la personnalité et le vrai robot.
  *
- * Les mouvements autonomes sont volontairement courts et bornés.
- * L'annulation de la coroutine interrompt la séquence sans envoyer
- * d'ordre tardif susceptible d'écraser une commande manuelle.
+ * Point important : toute impulsion moteur possède maintenant un finally.
+ * Une interruption au milieu d'une animation ne peut donc plus laisser une
+ * chenille, la tête ou le lift continuer faute d'avoir reçu son ordre STOP.
  */
 class CozmoRobotActions(
     private val connection: CozmoConnection
@@ -38,23 +38,27 @@ class CozmoRobotActions(
             }
 
             is RobotAction.Drive -> {
-                connection.drive(action.leftMmps, action.rightMmps)
-                delay(action.durationMs.coerceIn(20L, 1_500L))
-                connection.drive(0f, 0f)
+                drivePulse(
+                    action.leftMmps,
+                    action.rightMmps,
+                    action.durationMs.coerceIn(20L, 1_500L)
+                )
                 ActionResult(ActionStatus.SUCCESS)
             }
 
             is RobotAction.MoveHead -> {
-                connection.moveHead(action.speedRadPerSec.coerceIn(-1.5f, 1.5f))
-                delay(action.durationMs.coerceIn(20L, 800L))
-                connection.moveHead(0f)
+                headPulse(
+                    action.speedRadPerSec.coerceIn(-1.5f, 1.5f),
+                    action.durationMs.coerceIn(20L, 800L)
+                )
                 ActionResult(ActionStatus.SUCCESS)
             }
 
             is RobotAction.MoveLift -> {
-                connection.moveLift(action.speedRadPerSec.coerceIn(-1.5f, 1.5f))
-                delay(action.durationMs.coerceIn(20L, 800L))
-                connection.moveLift(0f)
+                liftPulse(
+                    action.speedRadPerSec.coerceIn(-1.5f, 1.5f),
+                    action.durationMs.coerceIn(20L, 800L)
+                )
                 ActionResult(ActionStatus.SUCCESS)
             }
 
@@ -72,14 +76,30 @@ class CozmoRobotActions(
             }
 
             is RobotAction.PlaySound -> {
-                val samples = PersonalityAudioCatalog.samples(action.cue)
-                connection.playPcm22050(samples)
+                connection.playPcm22050(
+                    PersonalityAudioCatalog.samples(action.cue)
+                )
                 ActionResult(ActionStatus.SUCCESS)
             }
 
-            is RobotAction.PlayAnimation -> {
+            is RobotAction.PlayAnimation ->
                 playMotionMacro(action.name)
-            }
+
+            is RobotAction.Express ->
+                coroutineScope {
+                    val audioJob =
+                        action.cue?.let { cue ->
+                            launch {
+                                connection.playPcm22050(
+                                    PersonalityAudioCatalog.samples(cue)
+                                )
+                            }
+                        }
+
+                    val result = playMotionMacro(action.name)
+                    audioJob?.join()
+                    result
+                }
 
             is RobotAction.Speak -> {
                 ActionResult(
@@ -101,7 +121,7 @@ class CozmoRobotActions(
                 when (name) {
                     "double_blink" -> {
                         connection.playFaceAnimation(CozmoFaceAnimation.BLINK)
-                        delay(80)
+                        delay(55)
                         connection.playFaceAnimation(CozmoFaceAnimation.BLINK)
                     }
 
@@ -111,174 +131,302 @@ class CozmoRobotActions(
                 }
             }
 
-            val known = when (name) {
-                "greeting" -> {
-                    headPulse(0.75f, 130)
-                    headPulse(-0.45f, 90)
-                    true
+            try {
+                val known = when (name) {
+                    "greeting" -> {
+                        parallelPulse(
+                            head = 0.95f to 115L,
+                            lift = 0.48f to 105L
+                        )
+                        parallelPulse(
+                            drive = (-34f to 34f) to 95L,
+                            head = -0.55f to 85L
+                        )
+                        true
+                    }
+
+                    "cube_interest" -> {
+                        parallelPulse(
+                            head = -0.72f to 105L,
+                            lift = 0.62f to 90L
+                        )
+                        parallelPulse(
+                            head = 0.48f to 75L,
+                            lift = -0.46f to 70L
+                        )
+                        true
+                    }
+
+                    "picked_up" -> {
+                        parallelPulse(
+                            head = 0.90f to 95L,
+                            lift = 0.78f to 100L
+                        )
+                        true
+                    }
+
+                    "put_down" -> {
+                        parallelPulse(
+                            head = 0.45f to 80L,
+                            lift = -0.55f to 80L
+                        )
+                        true
+                    }
+
+                    "happy_small" -> {
+                        parallelPulse(
+                            drive = (-30f to 30f) to 90L,
+                            head = 0.82f to 90L,
+                            lift = 0.54f to 80L
+                        )
+                        parallelPulse(
+                            drive = (30f to -30f) to 90L,
+                            head = -0.68f to 85L,
+                            lift = -0.42f to 70L
+                        )
+                        true
+                    }
+
+                    "playful_invite" -> {
+                        drivePulse(-58f, 58f, 105)
+                        drivePulse(62f, -62f, 165)
+                        parallelPulse(
+                            drive = (-52f to 52f) to 95L,
+                            head = 0.75f to 90L,
+                            lift = 0.55f to 85L
+                        )
+                        true
+                    }
+
+                    "acknowledge" -> {
+                        headPulse(-0.62f, 70)
+                        headPulse(0.62f, 75)
+                        true
+                    }
+
+                    "low_energy" -> {
+                        parallelPulse(
+                            head = -0.42f to 170L,
+                            lift = -0.38f to 160L
+                        )
+                        true
+                    }
+
+                    "look_around" -> {
+                        parallelPulse(
+                            drive = (-40f to 40f) to 125L,
+                            head = 0.42f to 105L
+                        )
+                        parallelPulse(
+                            drive = (42f to -42f) to 225L,
+                            head = -0.55f to 130L
+                        )
+                        drivePulse(-36f, 36f, 105)
+                        true
+                    }
+
+                    "idle_blink" -> {
+                        delay(85)
+                        true
+                    }
+
+                    "double_blink" -> {
+                        delay(120)
+                        true
+                    }
+
+                    "curious_nod" -> {
+                        headPulse(-0.62f, 75)
+                        headPulse(0.72f, 85)
+                        true
+                    }
+
+                    "head_peek" -> {
+                        parallelPulse(
+                            head = 0.68f to 95L,
+                            drive = (-24f to 24f) to 75L
+                        )
+                        headPulse(-0.38f, 65)
+                        true
+                    }
+
+                    "small_bounce" -> {
+                        parallelPulse(
+                            head = 0.62f to 70L,
+                            lift = 0.70f to 75L
+                        )
+                        parallelPulse(
+                            head = -0.42f to 60L,
+                            lift = -0.56f to 65L
+                        )
+                        true
+                    }
+
+                    "tiny_wiggle" -> {
+                        drivePulse(-36f, 36f, 75)
+                        drivePulse(38f, -38f, 125)
+                        drivePulse(-36f, 36f, 75)
+                        true
+                    }
+
+                    "cube_peek" -> {
+                        parallelPulse(
+                            head = -0.68f to 95L,
+                            lift = 0.50f to 75L
+                        )
+                        delay(65)
+                        liftPulse(-0.42f, 65)
+                        true
+                    }
+
+                    "on_back_notice" -> {
+                        headPulse(0.42f, 80)
+                        true
+                    }
+
+                    "on_face_notice" -> {
+                        liftPulse(-0.36f, 75)
+                        true
+                    }
+
+                    "on_side_notice" -> {
+                        headPulse(0.42f, 70)
+                        true
+                    }
+
+                    "wheelie_notice" -> {
+                        parallelPulse(
+                            head = 0.42f to 75L,
+                            lift = 0.46f to 80L
+                        )
+                        true
+                    }
+
+                    "wander_short" -> {
+                        parallelPulse(
+                            drive = (48f to 48f) to 180L,
+                            head = 0.34f to 120L
+                        )
+                        drivePulse(34f, -34f, 105)
+                        true
+                    }
+
+                    "body_bob" -> {
+                        parallelPulse(
+                            head = 0.58f to 75L,
+                            lift = 0.64f to 80L
+                        )
+                        parallelPulse(
+                            head = -0.48f to 65L,
+                            lift = -0.52f to 70L
+                        )
+                        true
+                    }
+
+                    // Micro-animations plus proches du rythme du Cozmo original :
+                    // rapides, fréquentes et avec plusieurs axes en parallèle.
+                    "micro_scan" -> {
+                        parallelPulse(
+                            drive = (-28f to 28f) to 70L,
+                            head = 0.55f to 75L
+                        )
+                        drivePulse(28f, -28f, 80)
+                        true
+                    }
+
+                    "quick_bob" -> {
+                        parallelPulse(
+                            head = 0.72f to 65L,
+                            lift = 0.78f to 70L
+                        )
+                        parallelPulse(
+                            head = -0.55f to 55L,
+                            lift = -0.65f to 60L
+                        )
+                        true
+                    }
+
+                    "dash_peek" -> {
+                        parallelPulse(
+                            drive = (58f to 58f) to 130L,
+                            head = 0.48f to 95L
+                        )
+                        drivePulse(-35f, 35f, 70)
+                        true
+                    }
+
+                    "excited_shuffle" -> {
+                        parallelPulse(
+                            drive = (-60f to 60f) to 85L,
+                            head = 0.82f to 80L,
+                            lift = 0.68f to 75L
+                        )
+                        parallelPulse(
+                            drive = (62f to -62f) to 110L,
+                            head = -0.65f to 85L,
+                            lift = -0.50f to 70L
+                        )
+                        drivePulse(-55f, 55f, 75)
+                        true
+                    }
+
+                    "fall_notice" -> {
+                        connection.stopAllMotors()
+                        delay(90)
+                        true
+                    }
+
+                    "cliff_notice" -> {
+                        connection.stopAllMotors()
+                        headPulse(-0.55f, 80)
+                        true
+                    }
+
+                    else -> false
                 }
 
-                "cube_interest" -> {
-                    headPulse(-0.55f, 130)
-                    liftPulse(0.55f, 90)
-                    liftPulse(-0.45f, 80)
-                    true
+                if (!known) {
+                    faceJob.cancel()
+                    return@coroutineScope ActionResult(
+                        ActionStatus.NOT_AVAILABLE,
+                        "Macro inconnue: $name"
+                    )
                 }
 
-                "picked_up" -> {
-                    headPulse(0.65f, 100)
-                    liftPulse(0.60f, 100)
-                    true
-                }
-
-                "put_down" -> {
-                    liftPulse(-0.45f, 80)
-                    headPulse(0.35f, 80)
-                    true
-                }
-
-                "happy_small" -> {
-                    headPulse(0.65f, 90)
-                    headPulse(-0.60f, 90)
-                    headPulse(0.45f, 75)
-                    true
-                }
-
-                "playful_invite" -> {
-                    drivePulse(-45f, 45f, 150)
-                    drivePulse(45f, -45f, 280)
-                    drivePulse(-45f, 45f, 140)
-                    true
-                }
-
-                "acknowledge" -> {
-                    headPulse(-0.42f, 90)
-                    headPulse(0.42f, 90)
-                    true
-                }
-
-                "low_energy" -> {
-                    headPulse(-0.40f, 180)
-                    liftPulse(-0.35f, 160)
-                    true
-                }
-
-                "look_around" -> {
-                    drivePulse(-32f, 32f, 150)
-                    drivePulse(32f, -32f, 300)
-                    drivePulse(-32f, 32f, 150)
-                    true
-                }
-
-                "idle_blink" -> {
-                    delay(130)
-                    true
-                }
-
-                "double_blink" -> {
-                    delay(180)
-                    true
-                }
-
-                "curious_nod" -> {
-                    headPulse(-0.38f, 95)
-                    headPulse(0.42f, 110)
-                    true
-                }
-
-                "head_peek" -> {
-                    headPulse(0.45f, 120)
-                    delay(90)
-                    headPulse(-0.28f, 85)
-                    true
-                }
-
-                "small_bounce" -> {
-                    liftPulse(0.45f, 75)
-                    headPulse(0.38f, 75)
-                    liftPulse(-0.35f, 65)
-                    true
-                }
-
-                "tiny_wiggle" -> {
-                    drivePulse(-24f, 24f, 105)
-                    drivePulse(24f, -24f, 210)
-                    drivePulse(-24f, 24f, 105)
-                    true
-                }
-
-                "cube_peek" -> {
-                    headPulse(-0.48f, 115)
-                    liftPulse(0.38f, 80)
-                    delay(100)
-                    liftPulse(-0.30f, 70)
-                    true
-                }
-
-                "on_back_notice" -> {
-                    headPulse(0.32f, 90)
-                    true
-                }
-
-                "on_face_notice" -> {
-                    liftPulse(-0.28f, 85)
-                    true
-                }
-
-                "on_side_notice" -> {
-                    headPulse(0.30f, 75)
-                    true
-                }
-
-                "wheelie_notice" -> {
-                    headPulse(0.32f, 85)
-                    liftPulse(0.32f, 85)
-                    true
-                }
-
-                "wander_short" -> {
-                    // Petit déplacement volontairement borné : suffisamment
-                    // visible pour rendre Cozmo vivant, sans traverser la pièce.
-                    drivePulse(34f, 34f, 240)
-                    drivePulse(24f, -24f, 150)
-                    true
-                }
-
-                "body_bob" -> {
-                    liftPulse(0.42f, 85)
-                    headPulse(0.36f, 85)
-                    liftPulse(-0.34f, 75)
-                    headPulse(-0.26f, 70)
-                    true
-                }
-
-                "fall_notice" -> {
-                    connection.stopAllMotors()
-                    delay(120)
-                    true
-                }
-
-                "cliff_notice" -> {
-                    connection.stopAllMotors()
-                    headPulse(-0.42f, 95)
-                    true
-                }
-
-                else -> false
-            }
-
-            if (!known) {
+                faceJob.join()
+                ActionResult(ActionStatus.SUCCESS)
+            } finally {
+                // Filet de sécurité essentiel lors d'un événement qui coupe une
+                // animation en cours : aucune commande moteur ne doit survivre.
                 faceJob.cancel()
-                return@coroutineScope ActionResult(
-                    ActionStatus.NOT_AVAILABLE,
-                    "Macro inconnue: $name"
+                connection.stopAllMotors()
+                connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
+            }
+        }
+
+    private suspend fun parallelPulse(
+        drive: Pair<Pair<Float, Float>, Long>? = null,
+        head: Pair<Float, Long>? = null,
+        lift: Pair<Float, Long>? = null
+    ) = coroutineScope {
+        drive?.let { (speeds, duration) ->
+            launch {
+                drivePulse(
+                    speeds.first,
+                    speeds.second,
+                    duration
                 )
             }
-
-            faceJob.join()
-            connection.setFaceExpression(CozmoFaceExpression.NEUTRAL)
-            ActionResult(ActionStatus.SUCCESS)
         }
+
+        head?.let { (speed, duration) ->
+            launch { headPulse(speed, duration) }
+        }
+
+        lift?.let { (speed, duration) ->
+            launch { liftPulse(speed, duration) }
+        }
+    }
 
     private fun faceAnimationFor(name: String): CozmoFaceAnimation? =
         when (name) {
@@ -287,7 +435,9 @@ class CozmoRobotActions(
             "playful_invite",
             "small_bounce",
             "tiny_wiggle",
-            "body_bob" -> CozmoFaceAnimation.HAPPY
+            "body_bob",
+            "quick_bob",
+            "excited_shuffle" -> CozmoFaceAnimation.HAPPY
 
             "cube_interest",
             "cube_peek",
@@ -296,7 +446,9 @@ class CozmoRobotActions(
             "acknowledge",
             "on_side_notice",
             "wheelie_notice",
-            "wander_short" -> CozmoFaceAnimation.CURIOUS
+            "wander_short",
+            "micro_scan",
+            "dash_peek" -> CozmoFaceAnimation.CURIOUS
 
             "picked_up",
             "on_back_notice" -> CozmoFaceAnimation.PICKUP
@@ -316,16 +468,22 @@ class CozmoRobotActions(
 
     private suspend fun headPulse(speed: Float, durationMs: Long) {
         connection.moveHead(speed)
-        delay(durationMs)
-        connection.moveHead(0f)
-        delay(35)
+        try {
+            delay(durationMs)
+        } finally {
+            connection.moveHead(0f)
+        }
+        delay(18)
     }
 
     private suspend fun liftPulse(speed: Float, durationMs: Long) {
         connection.moveLift(speed)
-        delay(durationMs)
-        connection.moveLift(0f)
-        delay(35)
+        try {
+            delay(durationMs)
+        } finally {
+            connection.moveLift(0f)
+        }
+        delay(18)
     }
 
     private suspend fun drivePulse(
@@ -334,9 +492,12 @@ class CozmoRobotActions(
         durationMs: Long
     ) {
         connection.drive(left, right)
-        delay(durationMs)
-        connection.drive(0f, 0f)
-        delay(45)
+        try {
+            delay(durationMs)
+        } finally {
+            connection.drive(0f, 0f)
+        }
+        delay(22)
     }
 
     private fun PersonalityLight.toBackpack(): BackpackColor =
