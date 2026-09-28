@@ -230,6 +230,28 @@ class CozmoRobotActions(
                     true
                 }
 
+                "wheelie_notice" -> {
+                    headPulse(0.32f, 85)
+                    liftPulse(0.32f, 85)
+                    true
+                }
+
+                "wander_short" -> {
+                    // Petit déplacement volontairement borné : suffisamment
+                    // visible pour rendre Cozmo vivant, sans traverser la pièce.
+                    drivePulse(34f, 34f, 240)
+                    drivePulse(24f, -24f, 150)
+                    true
+                }
+
+                "body_bob" -> {
+                    liftPulse(0.42f, 85)
+                    headPulse(0.36f, 85)
+                    liftPulse(-0.34f, 75)
+                    headPulse(-0.26f, 70)
+                    true
+                }
+
                 "fall_notice" -> {
                     connection.stopAllMotors()
                     delay(120)
@@ -264,14 +286,17 @@ class CozmoRobotActions(
             "happy_small",
             "playful_invite",
             "small_bounce",
-            "tiny_wiggle" -> CozmoFaceAnimation.HAPPY
+            "tiny_wiggle",
+            "body_bob" -> CozmoFaceAnimation.HAPPY
 
             "cube_interest",
             "cube_peek",
             "curious_nod",
             "head_peek",
             "acknowledge",
-            "on_side_notice" -> CozmoFaceAnimation.CURIOUS
+            "on_side_notice",
+            "wheelie_notice",
+            "wander_short" -> CozmoFaceAnimation.CURIOUS
 
             "picked_up",
             "on_back_notice" -> CozmoFaceAnimation.PICKUP
